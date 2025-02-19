@@ -19,6 +19,4 @@ def read_image(image_path):
       },
       "amount": parts[6]
     }
-    print(info_dict)
-
-read_image('comprobante.png')
+    return info_dict
