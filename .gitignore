@@ -14,6 +14,7 @@ venv.bak/
 *.log
 *.db
 *.sqlite3
+--__pycache__
 
 # VS Code
 .vscode/
