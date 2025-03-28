@@ -1,5 +1,5 @@
 from typing import Annotated
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException
 from starlette import status
 from pydantic import BaseModel, Field
 from db.database import SessionLocal
@@ -29,7 +29,6 @@ db_dependency = Annotated[Session, Depends(get_db)]
 bcrypt_context = CryptContext(schemes=['bcrypt'], deprecated='auto')
 oauth2_bearer = OAuth2PasswordBearer(tokenUrl='auth/token')
 
-
 class CreateUserRequest(BaseModel):
   first_name: str
   last_name: str
@@ -38,8 +37,6 @@ class CreateUserRequest(BaseModel):
   phone: str
   permission_level: str
   entity: str
-
-
 
 class Token(BaseModel):
   access_token: str
@@ -112,12 +109,20 @@ async def get_login_token(form_data: Annotated[OAuth2PasswordRequestForm, Depend
 
 
 @router.get("/users", status_code=status.HTTP_200_OK)
-async def get_users(db: db_dependency):
-  return db.query(Users).all()
+async def get_users(db: db_dependency, user: Annotated[dict, Depends(get_current_user)]):
+  if user is None:
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+  
+  user_model = db.query(Users).filter(Users.id == user.get('id')).first()
+
+  return db.query(Users).filter(Users.entity_id == user_model.entity_id).all()
 
 @router.delete("/users", status_code=status.HTTP_202_ACCEPTED)
-async def delete_user(db: db_dependency, user_id: int):
+async def delete_user(db: db_dependency, user_id: int, user: Annotated[dict, Depends(get_current_user)]):
   user_model = db.query(Users).filter(Users.id == user_id).first()
+  if user is None:
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+  
   if user_model is None:
     raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"User {user_id} not found")
   db.query(Users).filter(Users.id == user_id).delete()

@@ -70,6 +70,7 @@ class Trx(Base):
     receptorCBU = Column(String, nullable=False)
     entityId = Column(Integer, ForeignKey("entities.id"))
     amount = Column(Float, nullable=False)
+    date = Column(String, nullable=False)
 
 
 # CBU Model
