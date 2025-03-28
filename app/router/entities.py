@@ -26,7 +26,7 @@ class NewEntityRequest(BaseModel):
   cbu_number: str = Field(..., min_length=22, max_length=22, pattern=r'^\d{22}$')
   cbu_bank_account: str = Field(..., min_length=1, max_length=255)
   cbu_alias: str = Field(..., min_length=1, max_length=255)
-  cbu_cuit: str = Field(..., min_length=1, max_length=255)
+  cbu_cuit: str = Field(..., min_length=13, max_length=13, pattern=r'^\d{2}-\d{8}-\d{1}$')
 
 def get_db():
   db = SessionLocal()
