@@ -2,7 +2,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.orm import declarative_base
 
-SQLALCHEMY_DATABASE_URL = 'postgresql://vertex:vertex2025@cddatabase.cc1ao8osa9zo.us-east-1.rds.amazonaws.com:5432/cddatabase'
+SQLALCHEMY_DATABASE_URL = "postgresql://vertex:vertex2025@cddatabase.cc1ao8osa9zo.us-east-1.rds.amazonaws.com:5432/cddatabase?sslmode=require"
 engine = create_engine(SQLALCHEMY_DATABASE_URL)
 
 SessionLocal = sessionmaker(autoflush=False, autocommit=False, bind=engine)
