@@ -64,11 +64,11 @@ class Trx(Base):
     __tablename__ = "trx"
 
     id = Column(Integer, primary_key=True, index=True)
-    emisorCBU = Column(String, nullable=False)
-    emisorName = Column(String, nullable=False)
-    emisorCUIT = Column(String, nullable=False)
-    receptorCBU = Column(String, nullable=False)
-    entityId = Column(Integer, ForeignKey("entities.id"))
+    emisor_cbu = Column(String, nullable=True)
+    emisor_name = Column(String, nullable=False)
+    emisor_cuit = Column(String, nullable=False)
+    receptor_cbu = Column(String, nullable=False)
+    entity_id = Column(Integer, ForeignKey("entities.id"))
     amount = Column(Float, nullable=False)
     date = Column(String, nullable=False)
 

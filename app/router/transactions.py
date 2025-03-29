@@ -64,11 +64,11 @@ async def upload_new_document(db: db_dependency, user: user_dependency, document
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Entity not found with cuit: {entity_cuit}")
       
       create_user_model = Trx(
-        emisorCBU=document_data.get('emisor_cbu'),
-        emisorName=document_data.get('emisor_name'),
-        emisorCUIT=document_data.get('emisor_cuit'),
-        receptorCBU=cbu_model.nro,
-        entityId=entity_model.id,
+        emisor_cbu=document_data.get('emisor_cbu'),
+        emisor_name=document_data.get('emisor_name'),
+        emisor_cuit=document_data.get('emisor_cuit'),
+        receptor_cbu=cbu_model.nro,
+        entity_id=entity_model.id,
         amount=document_data.get('amount'),
         date=document_data.get('date')
       )
