@@ -71,6 +71,9 @@ async def get_current_user(token: Annotated[str, Depends(oauth2_bearer)]):
   except JWTError:
     raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='Invalid Credentials')
 
+def validate_user(user):
+  if user is None:
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
 @router.post("/", status_code=status.HTTP_201_CREATED)
 async def create_user(db: db_dependency, create_user_request: CreateUserRequest):
@@ -105,25 +108,15 @@ async def get_login_token(form_data: Annotated[OAuth2PasswordRequestForm, Depend
     raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='Could not validate user.')
   user_permission = db.query(Permission).filter(user.perm_id == Permission.id).first()
   token = create_token(user.email, user.id, user_permission.level, timedelta(minutes=20 ))
-  return {'access_token': token, 'token_type': 'bearer'}
+  return {'access_token': token, 'token_type': 'Bearer'}
 
-
-@router.get("/users", status_code=status.HTTP_200_OK)
-async def get_users(db: db_dependency, user: Annotated[dict, Depends(get_current_user)]):
-  if user is None:
-    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
-  
-  user_model = db.query(Users).filter(Users.id == user.get('id')).first()
-
-  return db.query(Users).filter(Users.entity_id == user_model.entity_id).all()
 
 @router.delete("/users", status_code=status.HTTP_202_ACCEPTED)
 async def delete_user(db: db_dependency, user_id: int, user: Annotated[dict, Depends(get_current_user)]):
+  validate_user(user=user)
   user_model = db.query(Users).filter(Users.id == user_id).first()
-  if user is None:
-    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
-  
   if user_model is None:
     raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"User {user_id} not found")
+  
   db.query(Users).filter(Users.id == user_id).delete()
   db.commit()

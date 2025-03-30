@@ -58,6 +58,15 @@ async def get_all_entities(db: db_dependency, user: user_dependency):
   return db.query(Entity).all()
 
 
+@router.get("/{entity_id}", status_code=status.HTTP_200_OK)
+async def get_entity_by_id(db: db_dependency, user: user_dependency, entity_id: int):
+  validate_user_admin(user=user)
+  entity = db.query(Entity).filter(Entity.id == entity_id).first()
+  if entity is None:
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Entity with ID {entity_id} not found")  
+  return entity
+
+
 @router.post("", status_code=status.HTTP_201_CREATED)
 async def create_new_entity(db: db_dependency, user: user_dependency, entity_request: NewEntityRequest):
   validate_user_admin(user=user)

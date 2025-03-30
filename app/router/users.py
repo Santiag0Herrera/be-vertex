@@ -35,10 +35,32 @@ def validate_user(user):
   return True
 
 
+@router.get("/all", status_code=status.HTTP_200_OK)
+async def get_users(db: db_dependency, user: Annotated[dict, Depends(get_current_user)]):
+  validate_user(user=user)
+  user_model = db.query(Users).filter(Users.id == user.get('id')).first()
+  return db.query(Users).filter(Users.entity_id == user_model.entity_id).all()
+
+
 @router.get("/me", status_code=status.HTTP_200_OK)
 async def get_current_user_info(user: user_dependency, db: db_dependency):
   validate_user(user=user)
-  return db.query(Users).filter(Users.id == user.get('id')).first()
+  user_model = db.query(Users).filter(Users.id == user.get('id')).first()
+  if user_model.entity.status != 'enabled':
+    raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Entity not enabled")
+  
+  return {
+  'id': user_model.id,
+  'first_name': user_model.first_name,
+  'last_name': user_model.last_name,
+  'email': user_model.email,
+  'permission_level': user_model.permission,
+  'phone': user_model.phone,
+  'entity': {
+    'name': user_model.entity.name ,
+    'id': user_model.entity.id
+  }
+}
 
 
 @router.put("/me/changePassword", status_code=status.HTTP_200_OK)
