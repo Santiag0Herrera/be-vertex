@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from db.database import create_tables
-from router import auth, transactions, users, entities
+from router import auth, transactions, users, entities, products
 
 app = FastAPI()
 
@@ -18,3 +18,4 @@ app.include_router(auth.router)
 app.include_router(users.router)
 app.include_router(transactions.router)
 app.include_router(entities.router)
+app.include_router(products.router)

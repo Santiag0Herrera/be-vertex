@@ -44,9 +44,7 @@ def validate_user(user):
   return True
 
 def validate_user_admin(user):
-  if user is None:
-    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found.")
-
+  validate_user(user=user)
   if user.get('user_perm') != 'admin':
     raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied. Insufficient permissions.")
   return True

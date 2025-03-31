@@ -54,6 +54,8 @@ class Product(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, nullable=False)
+    description = Column(String, nullable=False)
+    img = Column(String, nullable=False)
     path = Column(String, nullable=False)
 
     permissions = relationship("Permission", back_populates="product_rel")

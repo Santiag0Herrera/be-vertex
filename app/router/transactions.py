@@ -1,7 +1,8 @@
 from typing import Annotated
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
-from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import extract
+from fastapi import APIRouter, Depends, HTTPException, Query
 from db.database import SessionLocal
 from starlette import status
 from .auth import get_current_user
@@ -34,12 +35,18 @@ def validate_user(user):
   return True
 
 
-@router.get("", status_code=status.HTTP_200_OK)
-async def get_all_transactions(db: db_dependency, user: user_dependency):
-  validate_user(user=user)
-  user_model = db.query(Users).filter(Users.id == user.get('id')).first()
-  transactions_model = db.query(Trx).filter(Trx.entityId == user_model.entity_id).all()
-  return transactions_model
+@router.get("/all", status_code=status.HTTP_200_OK)
+async def get_all_transactions(
+    db: db_dependency,
+    user: user_dependency,
+    month: int = Query(..., gt=0, lt=13),
+    year: int = Query(..., gt=2000)
+):
+    validate_user(user=user)
+    user_model = db.query(Users).filter(Users.id == user.get('id')).first()
+    transactions_model = db.query(Trx).filter(Trx.entity_id == user_model.entity_id, extract('month', Trx.date) == month, extract('year', Trx.date) == year).all()
+
+    return transactions_model
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)
