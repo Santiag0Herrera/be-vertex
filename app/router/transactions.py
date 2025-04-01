@@ -40,13 +40,23 @@ async def get_all_transactions(
     db: db_dependency,
     user: user_dependency,
     month: int = Query(..., gt=0, lt=13),
-    year: int = Query(..., gt=2000)
+    year: int = Query(..., gt=2000),
+    day: int = Query(..., gt=0, lt=32)
 ):
     validate_user(user=user)
     user_model = db.query(Users).filter(Users.id == user.get('id')).first()
-    transactions_model = db.query(Trx).filter(Trx.entity_id == user_model.entity_id, extract('month', Trx.date) == month, extract('year', Trx.date) == year).all()
-
-    return transactions_model
+    transactions_model = db.query(Trx)\
+        .filter(
+            Trx.entity_id == user_model.entity_id,
+            extract('month', Trx.date) == month,
+            extract('year', Trx.date) == year,
+            extract('day', Trx.date) == day,
+        ).all()
+    day_total_amount = sum(transaction.amount for transaction in transactions_model)
+    return {
+      "transactions": transactions_model,
+      "total_amount": day_total_amount
+    }
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)
