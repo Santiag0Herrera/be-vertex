@@ -66,6 +66,7 @@ class Trx(Base):
     __tablename__ = "trx"
 
     id = Column(Integer, primary_key=True, index=True)
+    trx_id = Column(String, unique=True)
     emisor_cbu = Column(String, nullable=True)
     emisor_name = Column(String, nullable=False)
     emisor_cuit = Column(String, nullable=False)
@@ -73,6 +74,7 @@ class Trx(Base):
     entity_id = Column(Integer, ForeignKey("entities.id"))
     amount = Column(Float, nullable=False)
     date = Column(String, nullable=False)
+    status = Column(String, nullable=False)
 
 
 # CBU Model

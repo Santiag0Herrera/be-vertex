@@ -15,9 +15,15 @@ router = APIRouter(
 )
 
 class DocumentRequest(BaseModel):
-  base64: str = Field(min_length=10)
-  type: str
-  bank: str
+  amount: float = Field(..., gt=0, description="Transaction amount, must be greater than 0")
+  trx_id: str = Field(..., min_length=4, description="Unique transaction ID from the comprobante")
+  emisor_name: str = Field(..., min_length=1, description="Name of the sender")
+  emisor_cuit: str = Field(..., pattern=r"^\d{11}$", description="CUIT of the sender, must be 11 digits")
+  emisor_cbu: str = Field(..., pattern=r"^\d{22}$", description="CBU of the sender, must be 22 digits")
+  receptor_name: str = Field(..., min_length=1, description="Name of the receiver")
+  receptor_cuit: str = Field(..., pattern=r"^\d{11}$", description="CUIT of the receiver, must be 11 digits")
+  receptor_cbu: str = Field(..., pattern=r"^\d{22}$", description="CBU of the receiver, must be 22 digits")
+  date: str = Field(..., pattern=r"^\d{4}-\d{2}-\d{2}$", description="Transaction date in YYYY-MM-DD format")
 
 def get_db():
   db = SessionLocal()
@@ -62,37 +68,33 @@ async def get_all_transactions(
 @router.post("", status_code=status.HTTP_201_CREATED)
 async def upload_new_document(db: db_dependency, user: user_dependency, document_request: DocumentRequest):
   validate_user(user=user)
-  document_data = {'No base64 data extracted'}
-  if document_request is None:
-    raise HTTPException(status_code=status.HTTP_406_NOT_ACCEPTABLE, detail="File format not acceptable")
+
+  cbu_model = db.query(CBU).filter(CBU.cuit == document_request.receptor_cuit).first()
+  if cbu_model is None:
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"No entity found with the provided CBU and CUIT combination")
   
-  if document_request.type == 'pdf':
-    if document_request.bank == 'mp':
-      document_data = extract_info_from_pdf_base64(document_request.base64)
-      entity_cuit = document_data.get('receptor_cuit')
+  trx_exists_model = db.query(Trx).filter(Trx.trx_id == document_request.trx_id).first()
+  if trx_exists_model is not None:
+    raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Transaction already exists")
 
-      cbu_model = db.query(CBU).filter(CBU.cuit == entity_cuit).first()
-      if cbu_model is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"No entity found with the provided CBU and CUIT combination")
-      
-      entity_model = db.query(Entity).filter(Entity.cbu_id == cbu_model.id).first()
-
-      if entity_model is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Entity not found with cuit: {entity_cuit}")
-      
-      create_user_model = Trx(
-        emisor_cbu=document_data.get('emisor_cbu'),
-        emisor_name=document_data.get('emisor_name'),
-        emisor_cuit=document_data.get('emisor_cuit'),
-        receptor_cbu=cbu_model.nro,
-        entity_id=entity_model.id,
-        amount=document_data.get('amount'),
-        date=document_data.get('date')
-      )
-      db.add(create_user_model)
-      db.commit()
+  entity_model = db.query(Entity).filter(Entity.cbu_id == cbu_model.id).first()
+  if entity_model is None:
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Entity not found with cuit: {document_request.receptor_cuit}")
+  
+  create_user_model = Trx(
+    emisor_cbu=document_request.emisor_cbu,
+    emisor_name=document_request.emisor_name,
+    emisor_cuit=document_request.emisor_cuit,
+    receptor_cbu=cbu_model.nro,
+    entity_id=entity_model.id,
+    amount=document_request.amount,
+    date=document_request.date,
+    trx_id=document_request.trx_id,
+    status="pendiente"
+  )
+  db.add(create_user_model)
+  db.commit()
       
   return {
     'message': 'Transaction registered!',
-    'document_info': document_data
   }
