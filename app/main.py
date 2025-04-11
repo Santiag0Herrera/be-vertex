@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from db.database import create_tables
-from router import auth, transactions, users, entities, products
+from router import auth, transactions, users, entities, products, clients
 from middlewares.PermissionMiddleware import PermissionMiddleware
 
 app = FastAPI()
@@ -21,3 +21,4 @@ app.include_router(users.router)
 app.include_router(transactions.router)
 app.include_router(entities.router)
 app.include_router(products.router)
+app.include_router(clients.router)

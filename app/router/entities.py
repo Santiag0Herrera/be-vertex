@@ -6,6 +6,7 @@ from db.database import SessionLocal
 from starlette import status
 from .auth import get_current_user
 from models import Entity, CBU
+from services.user_perm_validatior import validate_user_minimum_hierarchy
 
 router = APIRouter(
   prefix='/entities',
@@ -38,27 +39,16 @@ def get_db():
 db_dependency = Annotated[Session, Depends(get_db)]
 user_dependency = Annotated[dict, Depends(get_current_user)]
 
-def validate_user(user):
-  if user is None:
-    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found.")
-  return True
-
-def validate_user_admin(user):
-  validate_user(user=user)
-  if user.get('user_perm') != 'admin':
-    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied. Insufficient permissions.")
-  return True
-
 
 @router.get("", status_code=status.HTTP_200_OK)
 async def get_all_entities(db: db_dependency, user: user_dependency):
-  validate_user_admin(user=user)
+  validate_user_minimum_hierarchy(user=user, min_level="users")
   return db.query(Entity).all()
 
 
 @router.get("/{entity_id}", status_code=status.HTTP_200_OK)
 async def get_entity_by_id(db: db_dependency, user: user_dependency, entity_id: int):
-  validate_user_admin(user=user)
+  validate_user_minimum_hierarchy(user=user, min_level="admin")
   entity = db.query(Entity).filter(Entity.id == entity_id).first()
   if entity is None:
     raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Entity with ID {entity_id} not found")  
@@ -67,8 +57,7 @@ async def get_entity_by_id(db: db_dependency, user: user_dependency, entity_id: 
 
 @router.post("/new", status_code=status.HTTP_201_CREATED)
 async def create_new_entity(db: db_dependency, user: user_dependency, entity_request: NewEntityRequest):
-  validate_user_admin(user=user)
-  
+  validate_user_minimum_hierarchy(user=user, min_level="admin")
   entity_exists_model = db.query(Entity).filter(Entity.mail == entity_request.mail).first()
   if entity_exists_model is not None:
     raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=f"Entity with mail {entity_request.mail} already exists")

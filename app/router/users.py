@@ -7,6 +7,7 @@ from db.database import SessionLocal
 from starlette import status
 from .auth import get_current_user
 from passlib.context import CryptContext
+from services.user_perm_validatior import validate_user_minimum_hierarchy
 
 router = APIRouter(
   prefix='/users',
@@ -38,17 +39,18 @@ def validate_user(user):
 
 @router.get("/all", status_code=status.HTTP_200_OK)
 async def get_users(db: db_dependency, user: Annotated[dict, Depends(get_current_user)]):
-  validate_user(user=user)
-  user_model = db.query(Users).filter(Users.id == user.get('id')).first()
-  return db.query(Users).filter(Users.entity_id == user_model.entity_id).all()
+  validate_user_minimum_hierarchy(user=user, min_level='users')
+  users_model = db.query(Users).filter(
+      Users.entity_id == user.get('entity_id'),
+      Users.perm_id != 3
+  ).all()
+  return users_model
 
 
 @router.get("/me", status_code=status.HTTP_200_OK)
 async def get_current_user_info(user: user_dependency, db: db_dependency):
-  validate_user(user=user)
+  validate_user_minimum_hierarchy(user=user, min_level='users')
   user_model = db.query(Users).filter(Users.id == user.get('id')).first()
-  if user_model.entity.status != 'enabled':
-    raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Entity not enabled")
   return {
   'id': user_model.id,
   'first_name': user_model.first_name,

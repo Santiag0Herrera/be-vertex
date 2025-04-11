@@ -5,7 +5,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from db.database import SessionLocal
 from starlette import status
 from .auth import get_current_user
-from models import Entity, CBU, Users, Product
+from models import Entity, Users, Product
+from services.user_perm_validatior import validate_user_minimum_hierarchy
 
 router = APIRouter(
   prefix='/products',
@@ -22,20 +23,9 @@ def get_db():
 db_dependency = Annotated[Session, Depends(get_db)]
 user_dependency = Annotated[dict, Depends(get_current_user)]
 
-def validate_user(user):
-  if user is None:
-    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found.")
-  return True
-
-def validate_user_admin(user):
-  validate_user(user=user)
-  if user.get('user_perm') != 'admin':
-    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied. Insufficient permissions.")
-  return True
-
 @router.get("/all", status_code=status.HTTP_200_OK)
 async def get_all_products(db: db_dependency, user: user_dependency):
-  validate_user(user=user)
+  validate_user_minimum_hierarchy(user=user, min_level="users")
   user_model = db.query(Users).filter(Users.id == user.get('id')).first()
   entity_model = db.query(Entity).filter(Entity.id == user_model.entity_id).first()
   if entity_model is None:

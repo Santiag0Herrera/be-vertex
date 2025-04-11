@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from fastapi.security import OAuth2PasswordRequestForm, OAuth2PasswordBearer
 from jose import jwt, JWTError
 from datetime import timedelta, datetime, timezone
+from services.user_perm_validatior import validate_user_minimum_hierarchy
 
 router = APIRouter(
   prefix='/auth',
@@ -52,17 +53,23 @@ def authenticate_user(email: str, password: str, db):
   return user
 
 
-def create_token(email: str, user_id: int, permission_level: str, perm_id: int, hierarchy: int, expires_delta: timedelta):
-    encode = {
-        'sub': email,
-        'id': user_id,
-        'perm': permission_level,
-        'perm_id': perm_id,
-        'hierarchy': hierarchy
-    }
-    expires = datetime.now(timezone.utc) + expires_delta
-    encode.update({'exp': expires})
-    return jwt.encode(encode, SECRET_KEY, algorithm=ALGORITHM)
+def create_token(email: str, user_id: int, permission_level: str, perm_id: int, hierarchy: int, entity_id: int, expires_delta: timedelta, db: db_dependency):
+  entity = db.query(Entity).filter(Entity.id == entity_id).first()
+  # NO TOKEN WILL BE GENERATED IF ENTIY IS NOT ENABLED
+  if entity.status != 'enabled':
+    raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Entity not enabled")
+  
+  encode = {
+      'sub': email,
+      'id': user_id,
+      'perm': permission_level,
+      'perm_id': perm_id,
+      'hierarchy': hierarchy,
+      'entity_id': entity_id
+  }
+  expires = datetime.now(timezone.utc) + expires_delta
+  encode.update({'exp': expires})
+  return jwt.encode(encode, SECRET_KEY, algorithm=ALGORITHM)
 
 
 async def get_current_user(token: Annotated[str, Depends(oauth2_bearer)]):
@@ -71,16 +78,13 @@ async def get_current_user(token: Annotated[str, Depends(oauth2_bearer)]):
     email: str = payload.get('sub')
     user_id: int = payload.get('id')
     user_perm: str = payload.get('perm')
+    hierarchy: str = payload.get('hierarchy')
+    entity_id: str = payload.get('entity_id')
     if email is None or user_id is None:
       raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='Invalid Credentials') 
-    return {'email': email, 'id': user_id, 'user_perm': user_perm}
+    return {'email': email, 'id': user_id, 'user_perm': user_perm, 'hierarchy': hierarchy, 'entity_id': entity_id}
   except JWTError:
     raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='Invalid Credentials')
-
-
-def validate_user(user):
-  if user is None:
-    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
 
 @router.post("/", status_code=status.HTTP_201_CREATED)
@@ -122,14 +126,16 @@ async def get_login_token(form_data: Annotated[OAuth2PasswordRequestForm, Depend
       permission_level=user_permission.level,
       perm_id=user_permission.id,
       hierarchy=user_permission.hierarchy,
-      expires_delta=timedelta(minutes=20)
+      entity_id=user.entity_id,
+      expires_delta=timedelta(minutes=20),
+      db=db
   )
   return {'access_token': token, 'token_type': 'Bearer', 'user_level': user_permission.level}
 
 
 @router.delete("/users", status_code=status.HTTP_202_ACCEPTED)
 async def delete_user(db: db_dependency, user_id: int, user: Annotated[dict, Depends(get_current_user)]):
-  validate_user(user=user)
+  validate_user_minimum_hierarchy(user=user, min_level="users")
   user_model = db.query(Users).filter(Users.id == user_id).first()
   if user_model is None:
     raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"User {user_id} not found")

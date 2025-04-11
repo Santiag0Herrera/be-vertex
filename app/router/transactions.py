@@ -7,7 +7,7 @@ from db.database import SessionLocal
 from starlette import status
 from .auth import get_current_user
 from models import Entity, Users, Trx, CBU
-from services.pdf_reader import extract_info_from_pdf_base64
+from services.user_perm_validatior import validate_user_minimum_hierarchy
 
 router = APIRouter(
   prefix='/trx',
@@ -35,11 +35,6 @@ def get_db():
 db_dependency = Annotated[Session, Depends(get_db)]
 user_dependency = Annotated[dict, Depends(get_current_user)]
 
-def validate_user(user):
-  if user is None:
-    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
-  return True
-
 
 @router.get("/all", status_code=status.HTTP_200_OK)
 async def get_all_transactions(
@@ -49,7 +44,7 @@ async def get_all_transactions(
     year: int = Query(..., gt=2000),
     day: int = Query(..., gt=0, lt=32)
 ):
-    validate_user(user=user)
+    validate_user_minimum_hierarchy(user=user, min_level="users")
     user_model = db.query(Users).filter(Users.id == user.get('id')).first()
     transactions_model = db.query(Trx)\
         .filter(
@@ -67,7 +62,7 @@ async def get_all_transactions(
 
 @router.post("/new", status_code=status.HTTP_201_CREATED)
 async def upload_new_document(db: db_dependency, user: user_dependency, document_request: DocumentRequest):
-  validate_user(user=user)
+  validate_user_minimum_hierarchy(user=user, min_level="users")
 
   cbu_model = db.query(CBU).filter(CBU.cuit == document_request.receptor_cuit).first()
   if cbu_model is None:
