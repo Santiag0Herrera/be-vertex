@@ -41,7 +41,7 @@ class CreateUserRequest(BaseModel):
 class Token(BaseModel):
   access_token: str
   token_type: str
-
+  user_level: str
 
 def authenticate_user(email: str, password: str, db):
   user = db.query(Users).filter(Users.email == email).first()
@@ -52,11 +52,17 @@ def authenticate_user(email: str, password: str, db):
   return user
 
 
-def create_token(email: str, user_id: int, permission: str, expires_delta: timedelta):
-  encode = {'sub': email, 'id': user_id, 'perm': permission}
-  expires = datetime.now(timezone.utc) + expires_delta
-  encode.update({'exp': expires})
-  return jwt.encode(encode, SECRET_KEY, algorithm=ALGORITHM)
+def create_token(email: str, user_id: int, permission_level: str, perm_id: int, hierarchy: int, expires_delta: timedelta):
+    encode = {
+        'sub': email,
+        'id': user_id,
+        'perm': permission_level,
+        'perm_id': perm_id,
+        'hierarchy': hierarchy
+    }
+    expires = datetime.now(timezone.utc) + expires_delta
+    encode.update({'exp': expires})
+    return jwt.encode(encode, SECRET_KEY, algorithm=ALGORITHM)
 
 
 async def get_current_user(token: Annotated[str, Depends(oauth2_bearer)]):
@@ -71,9 +77,11 @@ async def get_current_user(token: Annotated[str, Depends(oauth2_bearer)]):
   except JWTError:
     raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='Invalid Credentials')
 
+
 def validate_user(user):
   if user is None:
     raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
 
 @router.post("/", status_code=status.HTTP_201_CREATED)
 async def create_user(db: db_dependency, create_user_request: CreateUserRequest):
@@ -106,9 +114,17 @@ async def get_login_token(form_data: Annotated[OAuth2PasswordRequestForm, Depend
   user = authenticate_user(form_data.username, form_data.password, db)
   if not user: 
     raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='Could not validate user.')
+  
   user_permission = db.query(Permission).filter(user.perm_id == Permission.id).first()
-  token = create_token(user.email, user.id, user_permission.level, timedelta(minutes=20 ))
-  return {'access_token': token, 'token_type': 'Bearer'}
+  token = create_token(
+      email=user.email,
+      user_id=user.id,
+      permission_level=user_permission.level,
+      perm_id=user_permission.id,
+      hierarchy=user_permission.hierarchy,
+      expires_delta=timedelta(minutes=20)
+  )
+  return {'access_token': token, 'token_type': 'Bearer', 'user_level': user_permission.level}
 
 
 @router.delete("/users", status_code=status.HTTP_202_ACCEPTED)

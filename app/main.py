@@ -2,9 +2,11 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from db.database import create_tables
 from router import auth, transactions, users, entities, products
+from middlewares.PermissionMiddleware import PermissionMiddleware
 
 app = FastAPI()
 
+app.add_middleware(PermissionMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],

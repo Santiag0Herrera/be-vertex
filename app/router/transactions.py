@@ -65,7 +65,7 @@ async def get_all_transactions(
     }
 
 
-@router.post("", status_code=status.HTTP_201_CREATED)
+@router.post("/new", status_code=status.HTTP_201_CREATED)
 async def upload_new_document(db: db_dependency, user: user_dependency, document_request: DocumentRequest):
   validate_user(user=user)
 

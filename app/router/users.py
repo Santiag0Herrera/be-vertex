@@ -29,6 +29,7 @@ bcrypt_context = CryptContext(schemes=['bcrypt'], deprecated='auto')
 db_dependency = Annotated[Session, Depends(get_db)]
 user_dependency = Annotated[dict, Depends(get_current_user)]
 
+
 def validate_user(user):
   if user is None:
     raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
@@ -48,7 +49,6 @@ async def get_current_user_info(user: user_dependency, db: db_dependency):
   user_model = db.query(Users).filter(Users.id == user.get('id')).first()
   if user_model.entity.status != 'enabled':
     raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Entity not enabled")
-  
   return {
   'id': user_model.id,
   'first_name': user_model.first_name,
@@ -67,10 +67,8 @@ async def get_current_user_info(user: user_dependency, db: db_dependency):
 async def change_password(user: user_dependency, db: db_dependency, user_verification: UserVerification):
   validate_user(user=user)
   user_model = db.query(Users).filter(Users.id == user.get('id')).first()
-
   if not bcrypt_context.verify(user_verification.password, user_model.hashed_password):
     raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='Incorrect password')
-  
   user_model.hashed_password = bcrypt_context.hash(user_verification.new_password)
   db.add(user_model)
   db.commit()

@@ -65,7 +65,7 @@ async def get_entity_by_id(db: db_dependency, user: user_dependency, entity_id: 
   return entity
 
 
-@router.post("", status_code=status.HTTP_201_CREATED)
+@router.post("/new", status_code=status.HTTP_201_CREATED)
 async def create_new_entity(db: db_dependency, user: user_dependency, entity_request: NewEntityRequest):
   validate_user_admin(user=user)
   

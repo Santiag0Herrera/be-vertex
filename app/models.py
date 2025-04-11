@@ -43,9 +43,11 @@ class Permission(Base):
     id = Column(Integer, primary_key=True, index=True)
     product = Column(Integer, ForeignKey("products.id"))
     level = Column(String, nullable=False)
+    hierarchy = Column(Integer, nullable=False)
 
     users = relationship("Users", back_populates="permission")
     product_rel = relationship("Product", back_populates="permissions")
+    endpoints = relationship("Endpoints", back_populates="permission")
 
 
 # Product Model
@@ -88,3 +90,13 @@ class CBU(Base):
     cuit = Column(String, nullable=False)
 
     entity = relationship("Entity", back_populates="cbu", uselist=False)
+
+
+class Endpoints(Base):
+    __tablename__ = "endpoints"
+
+    id = Column(Integer, primary_key=True, index=True)
+    path = Column(String, unique=True, nullable=False)
+    perm_id = Column(Integer, ForeignKey("permissions.id"))
+
+    permission = relationship("Permission", back_populates="endpoints")
