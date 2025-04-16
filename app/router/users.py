@@ -49,7 +49,7 @@ async def get_users(db: db_dependency, user: Annotated[dict, Depends(get_current
 
 @router.get("/me", status_code=status.HTTP_200_OK)
 async def get_current_user_info(user: user_dependency, db: db_dependency):
-  validate_user_minimum_hierarchy(user=user, min_level='users')
+  validate_user_minimum_hierarchy(user=user, min_level='client')
   user_model = db.query(Users).filter(Users.id == user.get('id')).first()
   return {
   'id': user_model.id,
