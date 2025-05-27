@@ -7,7 +7,6 @@ from db.database import SessionLocal
 from starlette import status
 from .auth import get_current_user
 from passlib.context import CryptContext
-from services.user_perm_validatior import validate_user_minimum_hierarchy
 
 router = APIRouter(
   prefix='/users',
@@ -39,7 +38,6 @@ def validate_user(user):
 
 @router.get("/all", status_code=status.HTTP_200_OK)
 async def get_users(db: db_dependency, user: Annotated[dict, Depends(get_current_user)]):
-  validate_user_minimum_hierarchy(user=user, min_level='users')
   users_model = db.query(Users).filter(
       Users.entity_id == user.get('entity_id'),
       Users.perm_id != 3
@@ -49,7 +47,6 @@ async def get_users(db: db_dependency, user: Annotated[dict, Depends(get_current
 
 @router.get("/me", status_code=status.HTTP_200_OK)
 async def get_current_user_info(user: user_dependency, db: db_dependency):
-  validate_user_minimum_hierarchy(user=user, min_level='client')
   user_model = db.query(Users).filter(Users.id == user.get('id')).first()
   return {
   'id': user_model.id,
@@ -67,7 +64,6 @@ async def get_current_user_info(user: user_dependency, db: db_dependency):
 
 @router.put("/me/changePassword", status_code=status.HTTP_200_OK)
 async def change_password(user: user_dependency, db: db_dependency, user_verification: UserVerification):
-  validate_user(user=user)
   user_model = db.query(Users).filter(Users.id == user.get('id')).first()
   if not bcrypt_context.verify(user_verification.password, user_model.hashed_password):
     raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='Incorrect password')

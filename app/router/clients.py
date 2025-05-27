@@ -1,7 +1,6 @@
 from typing import Annotated
 from sqlalchemy.orm import Session
 from fastapi import APIRouter, Depends, HTTPException
-from services.user_perm_validatior import validate_user_minimum_hierarchy
 from db.database import SessionLocal
 from starlette import status
 from .auth import get_current_user
@@ -24,8 +23,6 @@ user_dependency = Annotated[dict, Depends(get_current_user)]
 
 @router.get("/all", status_code=status.HTTP_200_OK)
 async def get_all_clients(db: db_dependency, user: user_dependency):
-  validate_user_minimum_hierarchy(user=user, min_level="users")
-
   perm_model = db.query(Permission).filter(Permission.level == 'client').first()
   if perm_model is None:
     raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Error searching for permissions")

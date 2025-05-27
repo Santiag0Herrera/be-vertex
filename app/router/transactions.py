@@ -7,7 +7,6 @@ from db.database import SessionLocal
 from starlette import status
 from .auth import get_current_user
 from models import Entity, Users, Trx, CBU
-from services.user_perm_validatior import validate_user_minimum_hierarchy
 from typing import Optional
 from datetime import date as dt_date
 
@@ -50,7 +49,6 @@ async def get_all_transactions(
     year: int = Query(..., gt=2000),
     day: int = Query(..., gt=0, lt=32)
 ):
-    validate_user_minimum_hierarchy(user=user, min_level="users")
     user_model = db.query(Users).filter(Users.id == user.get('id')).first()
     transactions_model = db.query(Trx)\
         .filter(
@@ -68,8 +66,6 @@ async def get_all_transactions(
 
 @router.post("/new", status_code=status.HTTP_201_CREATED)
 async def upload_new_document(db: db_dependency, user: user_dependency, document_request: DocumentRequest):
-  validate_user_minimum_hierarchy(user=user, min_level="client")
-
   cbu_model = db.query(CBU).filter(CBU.cuit == document_request.receptor_cuit).first()
   if cbu_model is None:
     raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"No entity found with the provided CBU and CUIT combination")
@@ -103,7 +99,6 @@ async def upload_new_document(db: db_dependency, user: user_dependency, document
 
 @router.post("/multiple/new", status_code=status.HTTP_201_CREATED)
 async def upload_multiple_new_document(db: db_dependency, user: user_dependency, data: MultipleDocumentRequest):
-  validate_user_minimum_hierarchy(user=user, min_level="users")
   trx_ids = [doc.trx_id for doc in data.transactions]
 
   entity_model = db.query(Entity).filter(Entity.cbu_id == user.get('entity_id')).first()

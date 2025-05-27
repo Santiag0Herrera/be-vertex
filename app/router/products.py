@@ -6,7 +6,6 @@ from db.database import SessionLocal
 from starlette import status
 from .auth import get_current_user
 from models import Entity, Users, Product
-from services.user_perm_validatior import validate_user_minimum_hierarchy
 
 router = APIRouter(
   prefix='/products',
@@ -25,7 +24,6 @@ user_dependency = Annotated[dict, Depends(get_current_user)]
 
 @router.get("/all", status_code=status.HTTP_200_OK)
 async def get_all_products(db: db_dependency, user: user_dependency):
-  validate_user_minimum_hierarchy(user=user, min_level="users")
   user_model = db.query(Users).filter(Users.id == user.get('id')).first()
   entity_model = db.query(Entity).filter(Entity.id == user_model.entity_id).first()
   if entity_model is None:

@@ -9,7 +9,6 @@ from sqlalchemy.orm import Session
 from fastapi.security import OAuth2PasswordRequestForm, OAuth2PasswordBearer
 from jose import jwt, JWTError
 from datetime import timedelta, datetime, timezone
-from services.user_perm_validatior import validate_user_minimum_hierarchy
 
 router = APIRouter(
   prefix='/auth',
@@ -135,7 +134,6 @@ async def get_login_token(form_data: Annotated[OAuth2PasswordRequestForm, Depend
 
 @router.delete("/users", status_code=status.HTTP_202_ACCEPTED)
 async def delete_user(db: db_dependency, user_id: int, user: Annotated[dict, Depends(get_current_user)]):
-  validate_user_minimum_hierarchy(user=user, min_level="users")
   user_model = db.query(Users).filter(Users.id == user_id).first()
   if user_model is None:
     raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"User {user_id} not found")
