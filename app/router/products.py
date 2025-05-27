@@ -1,8 +1,7 @@
 from typing import Annotated
-from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 from fastapi import APIRouter, Depends, HTTPException
-from db.database import SessionLocal
+from db.database import get_db
 from starlette import status
 from .auth import get_current_user
 from models import Entity, Users, Product
@@ -11,13 +10,6 @@ router = APIRouter(
   prefix='/products',
   tags=['Products']
 )
-
-def get_db():
-  db = SessionLocal()
-  try: 
-    yield db
-  finally:
-    db.close() 
 
 db_dependency = Annotated[Session, Depends(get_db)]
 user_dependency = Annotated[dict, Depends(get_current_user)]

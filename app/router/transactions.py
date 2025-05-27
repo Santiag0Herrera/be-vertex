@@ -1,41 +1,16 @@
 from typing import Annotated
-from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 from sqlalchemy import extract
 from fastapi import APIRouter, Depends, HTTPException, Query
-from db.database import SessionLocal
+from db.database import get_db
 from starlette import status
 from .auth import get_current_user
 from models import Entity, Users, Trx, CBU
-from typing import Optional
-from datetime import date as dt_date
 
 router = APIRouter(
   prefix='/trx',
   tags=['Transactions']
-)
-
-class DocumentRequest(BaseModel):
-  amount: float = Field(..., gt=0, description="Transaction amount, must be greater than 0")
-  trx_id: str = Field(..., min_length=4, description="Unique transaction ID from the comprobante")
-  emisor_name: str = Field(..., min_length=1, description="Name of the sender")
-  emisor_cuit: str = Field(..., pattern=r"^\d{11}$", description="CUIT of the sender, must be 11 digits")
-  emisor_cbu: Optional[str] = Field(None, pattern=r"^\d{22}$")
-  receptor_name: str = Field(..., min_length=1, description="Name of the receiver")
-  receptor_cuit: str = Field(..., pattern=r"^\d{11}$", description="CUIT of the receiver, must be 11 digits")
-  receptor_cbu: Optional[str] = Field(None, pattern=r"^\d{22}$")
-  date: dt_date = Field(..., description="Transaction date in YYYY-MM-DD format")
-
-class MultipleDocumentRequest(BaseModel):
-  transactions: list[DocumentRequest]
-  
-
-def get_db():
-  db = SessionLocal()
-  try: 
-    yield db
-  finally:
-    db.close() 
+) 
 
 db_dependency = Annotated[Session, Depends(get_db)]
 user_dependency = Annotated[dict, Depends(get_current_user)]

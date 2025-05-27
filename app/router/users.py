@@ -1,39 +1,20 @@
 from typing import Annotated
-from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 from fastapi import APIRouter, Depends, HTTPException
 from models import Users
-from db.database import SessionLocal
+from db.database import get_db
 from starlette import status
 from .auth import get_current_user
-from passlib.context import CryptContext
+from services.auth_service import bcrypt_context
+from schemas.users import UserVerification
 
 router = APIRouter(
   prefix='/users',
   tags=['Users']
 )
 
-def get_db():
-  db = SessionLocal()
-  try: 
-    yield db
-  finally:
-    db.close() 
-
-class UserVerification(BaseModel):
-  password: str
-  new_password: str = Field(min_length=6)
-
-
-bcrypt_context = CryptContext(schemes=['bcrypt'], deprecated='auto')
 db_dependency = Annotated[Session, Depends(get_db)]
 user_dependency = Annotated[dict, Depends(get_current_user)]
-
-
-def validate_user(user):
-  if user is None:
-    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
-  return True
 
 
 @router.get("/all", status_code=status.HTTP_200_OK)
