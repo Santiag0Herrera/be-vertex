@@ -1,12 +1,11 @@
 from typing import Annotated
 from sqlalchemy.orm import Session
 from fastapi import APIRouter, Depends, HTTPException
-from models import Users
-from db.database import get_db
+from app.models import Users
+from app.db.database import get_db
 from starlette import status
-from .auth import get_current_user
-from services.auth_service import bcrypt_context
-from schemas.users import UserVerification
+from app.services.auth_service import get_current_user, bcrypt_context
+from app.schemas.users import UserVerification
 
 router = APIRouter(
   prefix='/users',

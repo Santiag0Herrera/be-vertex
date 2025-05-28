@@ -1,8 +1,8 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from db.database import create_tables
-from router import auth, transactions, users, entities, products, clients
-from middlewares.PermissionMiddleware import PermissionMiddleware
+from app.db.database import create_tables
+from app.router import auth, transactions, users, entities, products, clients
+from app.middlewares.PermissionMiddleware import PermissionMiddleware
 
 app = FastAPI()
 

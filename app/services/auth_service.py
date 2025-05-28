@@ -1,6 +1,6 @@
-from models import Users, Entity
+from app.models import Users, Entity
 from typing import Annotated
-from db.database import get_db
+from app.db.database import get_db
 from sqlalchemy.orm import Session
 from fastapi import Depends, HTTPException
 from datetime import timedelta, datetime, timezone

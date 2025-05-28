@@ -3,8 +3,8 @@ from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.status import HTTP_403_FORBIDDEN, HTTP_401_UNAUTHORIZED
 from jose import jwt, JWTError
-from db.database import SessionLocal
-from models import Endpoints, Permission
+from app.db.database import SessionLocal
+from app.models import Endpoints, Permission
 import logging
 
 # Setup básico de logging

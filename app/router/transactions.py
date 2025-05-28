@@ -2,10 +2,11 @@ from typing import Annotated
 from sqlalchemy.orm import Session
 from sqlalchemy import extract
 from fastapi import APIRouter, Depends, HTTPException, Query
-from db.database import get_db
+from app.db.database import get_db
 from starlette import status
-from .auth import get_current_user
-from models import Entity, Users, Trx, CBU
+from app.services.auth_service import get_current_user
+from app.models import Entity, Users, Trx, CBU
+from app.schemas.transactions import DocumentRequest, MultipleDocumentRequest
 
 router = APIRouter(
   prefix='/trx',

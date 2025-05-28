@@ -1,21 +1,20 @@
 from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException
 from starlette import status
-from db.database import get_db
-from models import Users, Entity, Permission
+from app.db.database import get_db
+from app.models import Users, Entity, Permission
 from sqlalchemy.orm import Session
-from fastapi.security import OAuth2PasswordRequestForm
+from fastapi.security import OAuth2PasswordRequestForm, OAuth2PasswordBearer
 from datetime import timedelta
-from schemas.auth import CreateUserRequest, Token
-from services.auth_service import create_token, authenticate_user, get_current_user
-from services.auth_service import get_bcrypt_context
+from app.schemas.auth import CreateUserRequest, Token
+from app.services.auth_service import create_token, authenticate_user, get_current_user
+from app.services.auth_service import get_bcrypt_context
 
 db_dependency = Annotated[Session, Depends(get_db)]
 
 router = APIRouter(
   prefix='/auth',
-  tags=['Authentication'],
-  dependencies=[Depends(db_dependency)]
+  tags=['Authentication']
 )
 
 @router.post("/", status_code=status.HTTP_201_CREATED)
@@ -45,7 +44,7 @@ async def create_user(db: db_dependency, create_user_request: CreateUserRequest)
 
 
 @router.post("/token", response_model=Token)
-async def get_login_token(form_data: Annotated[OAuth2PasswordRequestForm, Depends()], db: db_dependency):
+async def get_login_token(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
   user = authenticate_user(form_data.username, form_data.password, db)
   if not user: 
     raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='Could not validate user.')

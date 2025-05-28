@@ -1,10 +1,10 @@
 from typing import Annotated
 from sqlalchemy.orm import Session
 from fastapi import APIRouter, Depends, HTTPException
-from db.database import get_db
+from app.db.database import get_db
 from starlette import status
-from services.auth_service import get_current_user
-from models import Users, Permission
+from app.services.auth_service import get_current_user
+from app.models import Users, Permission
 
 router = APIRouter(
   prefix='/clients',
