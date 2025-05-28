@@ -16,7 +16,6 @@ router = APIRouter(
 db_dependency = Annotated[Session, Depends(get_db)]
 user_dependency = Annotated[dict, Depends(get_current_user)]
 
-
 @router.get("/all", status_code=status.HTTP_200_OK)
 async def get_all_transactions(
     db: db_dependency,
@@ -41,7 +40,7 @@ async def get_all_transactions(
 
 
 @router.post("/new", status_code=status.HTTP_201_CREATED)
-async def upload_new_document(db: db_dependency, user: user_dependency, document_request: DocumentRequest):
+async def upload_new_document(db: db_dependency, document_request: DocumentRequest):
   cbu_model = db.query(CBU).filter(CBU.cuit == document_request.receptor_cuit).first()
   if cbu_model is None:
     raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"No entity found with the provided CBU and CUIT combination")
