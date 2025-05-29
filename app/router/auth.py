@@ -8,7 +8,7 @@ from fastapi.security import OAuth2PasswordRequestForm, OAuth2PasswordBearer
 from datetime import timedelta
 from app.schemas.auth import CreateUserRequest, Token
 from app.services.auth_service import create_token, authenticate_user, get_current_user
-from app.services.auth_service import get_bcrypt_context
+from app.services.auth_service import bcrypt_context
 
 db_dependency = Annotated[Session, Depends(get_db)]
 
@@ -34,7 +34,7 @@ async def create_user(db: db_dependency, create_user_request: CreateUserRequest)
     first_name=create_user_request.first_name,
     last_name=create_user_request.last_name,
     email=create_user_request.email,
-    hashed_password=get_bcrypt_context.hash(create_user_request.password),
+    hashed_password=bcrypt_context.hash(create_user_request.password),
     phone=create_user_request.phone,
     perm_id=permission_model.id,
     entity_id=entity_model.id

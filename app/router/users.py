@@ -5,7 +5,7 @@ from app.models import Users
 from app.db.database import get_db
 from starlette import status
 from app.services.auth_service import get_current_user, bcrypt_context
-from app.schemas.users import UserVerification
+from app.schemas.users import UserVerification, CreateUserRequest
 
 router = APIRouter(
   prefix='/users',
@@ -14,7 +14,6 @@ router = APIRouter(
 
 db_dependency = Annotated[Session, Depends(get_db)]
 user_dependency = Annotated[dict, Depends(get_current_user)]
-
 
 @router.get("/all", status_code=status.HTTP_200_OK)
 async def get_users(db: db_dependency, user: Annotated[dict, Depends(get_current_user)]):
@@ -50,3 +49,30 @@ async def change_password(user: user_dependency, db: db_dependency, user_verific
   user_model.hashed_password = bcrypt_context.hash(user_verification.new_password)
   db.add(user_model)
   db.commit()
+
+
+@router.post("/newUser", status_code=status.HTTP_201_CREATED)
+async def create_new_user(user: user_dependency, db: db_dependency, new_user_request: CreateUserRequest):
+
+  user_exists_model = db.query(Users).filter(Users.email == new_user_request.email).first()
+  if user_exists_model:
+    raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=f"User with email: {new_user_request.email} already exists")
+  
+  auto_generated_password = (new_user_request.first_name[:2] + new_user_request.last_name + "123").lower()
+
+  create_user_model = Users(
+    first_name=new_user_request.first_name,
+    last_name=new_user_request.last_name,
+    email=new_user_request.email,
+    hashed_password=bcrypt_context.hash(auto_generated_password),
+    phone=new_user_request.phone,
+    perm_id=2,
+    entity_id=user.get('entity_id')
+  )
+  db.add(create_user_model)
+  db.commit()
+
+  return {
+    "message": "User created successfully",
+    "generated_password": auto_generated_password
+  }

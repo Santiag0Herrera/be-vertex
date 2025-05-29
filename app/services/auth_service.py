@@ -16,9 +16,6 @@ bcrypt_context = CryptContext(schemes=['bcrypt'], deprecated='auto')
 db_dependency = Annotated[Session, Depends(get_db)]
 oauth2_bearer = OAuth2PasswordBearer(tokenUrl='auth/token')
 
-def get_bcrypt_context():
-  return bcrypt_context
-
 def authenticate_user(email: str, password: str, db):
   user = db.query(Users).filter(Users.email == email).first()
   if not user:
