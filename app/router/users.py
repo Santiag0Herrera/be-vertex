@@ -44,8 +44,10 @@ async def get_current_user_info(user: user_dependency, db: db_dependency):
 @router.put("/me/changePassword", status_code=status.HTTP_200_OK)
 async def change_password(user: user_dependency, db: db_dependency, user_verification: UserVerification):
   user_model = db.query(Users).filter(Users.id == user.get('id')).first()
+
   if not bcrypt_context.verify(user_verification.password, user_model.hashed_password):
     raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='Incorrect password')
+  
   user_model.hashed_password = bcrypt_context.hash(user_verification.new_password)
   db.add(user_model)
   db.commit()
@@ -75,4 +77,18 @@ async def create_new_user(user: user_dependency, db: db_dependency, new_user_req
   return {
     "detail": "Usuario creado correctamente",
     "generated_password": auto_generated_password
+  }
+
+
+@router.delete("/delete", status_code=status.HTTP_200_OK)
+async def delete_user(user: user_dependency, db: db_dependency, user_id: int):
+  if user.get("id") == user_id:
+    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No puedes eliminar tu usuario")
+  user_to_remove_model = db.query(Users).filter(Users.id == user_id).first()
+  if user_to_remove_model is None:
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Usuario Nro {user_id} no existe")
+  db.delete(user_to_remove_model)
+  db.commit()
+  return {
+    "detail": f"Usuario {user_to_remove_model.first_name} {user_to_remove_model.last_name} fue eliminado exitosamente."
   }
