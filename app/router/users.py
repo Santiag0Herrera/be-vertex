@@ -56,7 +56,7 @@ async def create_new_user(user: user_dependency, db: db_dependency, new_user_req
 
   user_exists_model = db.query(Users).filter(Users.email == new_user_request.email).first()
   if user_exists_model:
-    raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=f"User with email: {new_user_request.email} already exists")
+    raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=f"Usuario {new_user_request.email} ya existe.")
   
   auto_generated_password = (new_user_request.first_name[:2] + new_user_request.last_name + "123").lower()
 
@@ -73,6 +73,6 @@ async def create_new_user(user: user_dependency, db: db_dependency, new_user_req
   db.commit()
 
   return {
-    "message": "User created successfully",
+    "detail": "Usuario creado correctamente",
     "generated_password": auto_generated_password
   }
