@@ -84,9 +84,15 @@ async def create_new_user(user: user_dependency, db: db_dependency, new_user_req
 async def delete_user(user: user_dependency, db: db_dependency, user_id: int):
   if user.get("id") == user_id:
     raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No puedes eliminar tu usuario")
+  
   user_to_remove_model = db.query(Users).filter(Users.id == user_id).first()
+
   if user_to_remove_model is None:
     raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Usuario Nro {user_id} no existe")
+  
+  if user_to_remove_model.perm_id == 3:
+    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="El usuario que intentaste eliminar es un cliente")
+  
   db.delete(user_to_remove_model)
   db.commit()
   return {
