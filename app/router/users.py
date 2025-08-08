@@ -37,47 +37,14 @@ async def change_password(user: user_dependency, db: db_dependency, change_passw
 
 
 @router.post("/newUser", status_code=status.HTTP_201_CREATED)
-async def create_new_user(user: user_dependency, db: db_dependency, new_user_request: CreateUserRequest):
-
-  user_exists_model = db.query(Users).filter(Users.email == new_user_request.email).first()
-  if user_exists_model:
-    raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=f"Usuario {new_user_request.email} ya existe.")
-  
-  auto_generated_password = (new_user_request.first_name[:2] + new_user_request.last_name + "123").lower()
-
-  create_user_model = Users(
-    first_name=new_user_request.first_name,
-    last_name=new_user_request.last_name,
-    email=new_user_request.email,
-    hashed_password=bcrypt_context.hash(auto_generated_password),
-    phone=new_user_request.phone,
-    perm_id=2,
-    entity_id=user.get('entity_id')
-  )
-  db.add(create_user_model)
-  db.commit()
-
-  return {
-    "detail": "Usuario creado correctamente",
-    "generated_password": auto_generated_password
-  }
+async def create_new_user(user: user_dependency, db: db_dependency, create_user_request: CreateUserRequest):
+  db_service = DBService(db=db, req_user=user)
+  create_user_model = db_service.users.create(create_user_request)
+  return create_user_model
 
 
 @router.delete("/delete", status_code=status.HTTP_200_OK)
 async def delete_user(user: user_dependency, db: db_dependency, user_id: int):
-  if user.get("id") == user_id:
-    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No puedes eliminar tu usuario")
-  
-  user_to_remove_model = db.query(Users).filter(Users.id == user_id).first()
-
-  if user_to_remove_model is None:
-    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Usuario Nro {user_id} no existe")
-  
-  if user_to_remove_model.perm_id == 3:
-    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="El usuario que intentaste eliminar es un cliente")
-  
-  db.delete(user_to_remove_model)
-  db.commit()
-  return {
-    "detail": f"Usuario {user_to_remove_model.first_name} {user_to_remove_model.last_name} fue eliminado exitosamente."
-  }
+  db_service = DBService(db=db, req_user=user)
+  delete_user_model = db_service.users.delete(user_id)
+  return delete_user_model
