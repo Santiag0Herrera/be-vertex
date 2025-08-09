@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from app.db.database import get_db
 from starlette import status
 from app.services.auth_service import get_current_user
-from app.models import Users, Permission
+from app.services.DBService import DBService 
 
 router = APIRouter(
   prefix='/clients',
@@ -16,12 +16,6 @@ user_dependency = Annotated[dict, Depends(get_current_user)]
 
 @router.get("/all", status_code=status.HTTP_200_OK)
 async def get_all_clients(db: db_dependency, user: user_dependency):
-  perm_model = db.query(Permission).filter(Permission.level == 'client').first()
-  if perm_model is None:
-    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Error searching for permissions")
-  
-  clients_model = db.query(Users).filter(Users.perm_id == perm_model.id, Users.entity_id == user.get('entity_id')).all()
-  if clients_model is None:
-    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Error searching for clients")
-  
+  db_service = DBService(db=db, req_user=user)
+  clients_model = db_service.client.get_all()
   return clients_model

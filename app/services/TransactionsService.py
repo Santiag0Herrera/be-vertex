@@ -31,7 +31,7 @@ class TransactionsService:
       bank_number=bank_number,
       customer_id=customer_id
     )
-    self.error.raise_if_none(movement_model, "Movment")
+    return self.error.raise_if_none(movement_model, "Movment")
 
 
   def get_all(self, day, month, year):
