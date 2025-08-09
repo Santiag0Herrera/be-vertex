@@ -3,7 +3,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.db.database import create_tables
 from app.router import auth, transactions, users, entities, products, clients
 from app.middlewares.PermissionMiddleware import PermissionMiddleware
+from dotenv import load_dotenv
 
+load_dotenv(dotenv_path="dev.env")  # Esto carga las variables al entorno
 app = FastAPI()
 
 app.add_middleware(PermissionMiddleware)

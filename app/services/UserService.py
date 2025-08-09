@@ -10,7 +10,7 @@ class UserService():
   def __init__(self, db: Session, req_user: dict):
     self.db = db
     self.req_user = req_user
-    self.raise_error = ErrorService()
+    self.error = ErrorService()
     self.success = SuccessService()
 
   def get_all(self):
@@ -22,7 +22,7 @@ class UserService():
         Users.perm_id != 3
       ).all()
 
-      self.raise_error.raise_if_none(users_model)
+      self.error.raise_if_none(users_model)
       
       return self.success.response(users_model)
   
@@ -34,7 +34,7 @@ class UserService():
       Users.id == self.req_user.get('id')
     ).first()
     
-    self.raise_error.raise_if_none(user_model)
+    self.error.raise_if_none(user_model)
     
     return self.success.response({
       'id': user_model.id,
@@ -58,7 +58,7 @@ class UserService():
     ).first()
 
     if not bcrypt_context.verify(change_password_request.password, user_model.hashed_password):
-      self.raise_error.raise_unauthorized('Incorrect password')
+      self.error.raise_unauthorized('Incorrect password')
     
     user_model.hashed_password = bcrypt_context.hash(change_password_request.new_password)
     self.db.add(user_model)
@@ -72,7 +72,7 @@ class UserService():
     user_exists_model = self.db.query(Users).filter(Users.email == create_user_request.email).first()
   
     if user_exists_model:
-      self.raise_error.raise_conflict(f"Usuario {create_user_request.email} ya existe.")
+      self.error.raise_conflict(f"Usuario {create_user_request.email} ya existe.")
     
     auto_generated_password = (create_user_request.first_name[:2] + create_user_request.last_name + "123").lower()
 
@@ -91,15 +91,15 @@ class UserService():
   
   def delete(self, user_id: int):
     if self.req_user.get("id") == user_id:
-      self.raise_error.raise_conflict("You can not delete your own user account.")
+      self.error.raise_conflict("You can not delete your own user account.")
   
     user_model = self.db.query(Users).filter(Users.id == user_id).first()
 
     if user_model is None:
-      self.raise_error.raise_bad_request(f"User N°: {user_id} does not exist.")
+      self.error.raise_bad_request(f"User N°: {user_id} does not exist.")
     
     if user_model.perm_id == 3:
-      self.raise_error.raise_bad_request("The account is a client type.")
+      self.error.raise_bad_request("The account is a client type.")
     
     self.db.delete(user_model)
     self.db.commit()

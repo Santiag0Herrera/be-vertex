@@ -11,6 +11,7 @@ ENV/
 ENV.bak/
 venv.bak/
 .venv
+dev.env
 
 # FastAPI specific
 *.log
