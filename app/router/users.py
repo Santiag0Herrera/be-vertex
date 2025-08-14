@@ -1,10 +1,10 @@
 from typing import Annotated
 from sqlalchemy.orm import Session
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Body
 from app.db.database import get_db
 from starlette import status
 from app.services.auth_service import get_current_user
-from app.schemas.users import ChangePasswordRequest, CreateUserRequest
+from app.schemas.users import ChangePasswordRequest, CreateUserRequest, ChangePermissonRequest
 from app.services.DBService import DBService
 
 router = APIRouter(
@@ -47,3 +47,9 @@ async def delete_user(user: user_dependency, db: db_dependency, user_id: int):
   db_service = DBService(db=db, req_user=user)
   delete_user_model = db_service.users.delete(user_id)
   return delete_user_model
+
+@router.put("/changePermisson", status_code=status.HTTP_200_OK)
+async def change_permisson(user: user_dependency, db: db_dependency, change_permisson_request: ChangePermissonRequest):
+  db_service = DBService(db=db, req_user=user)
+  change_perm_model = db_service.users.change_permission(change_permisson_request)
+  return change_perm_model

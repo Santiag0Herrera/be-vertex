@@ -1,6 +1,6 @@
 from sqlalchemy.orm import Session
 from app.models import Users
-from app.schemas.users import ChangePasswordRequest, CreateUserRequest
+from app.schemas.users import ChangePasswordRequest, CreateUserRequest, ChangePermissonRequest
 from app.services.auth_service import bcrypt_context
 
 from .ErrorService import ErrorService
@@ -87,7 +87,7 @@ class UserService():
     )
     self.db.add(create_user_model)
     self.db.commit()
-    return self.success.response('User created successfully!')
+    return self.success.response({'message': 'Usuario creado con exito!', 'generated_password': auto_generated_password})
   
   def delete(self, user_id: int):
     if self.req_user.get("id") == user_id:
@@ -104,3 +104,31 @@ class UserService():
     self.db.delete(user_model)
     self.db.commit()
     return self.success.response(f"Usuario {user_model.first_name} {user_model.last_name} fue eliminado exitosamente.")
+  
+  def change_permission(self, change_permisson_request: ChangePermissonRequest):
+    """
+      tiene permisos ? --> middleware
+      puede hacerlo ? 
+        si no es él mismo.
+        si el usuario existe.
+        si el permiso nuevo no es el que ya tiene.
+    """
+
+    if self.req_user.get("id") == change_permisson_request.user_id:
+      self.error.raise_bad_request("User can not change his own permission.")
+    
+    user_model = self.db.query(Users).filter(
+      Users.id == change_permisson_request.user_id
+    ).first()
+    self.error.raise_if_none(user_model, f"User")
+    
+    if user_model.perm_id == change_permisson_request.perm_id:
+      return self.error.raise_bad_request("User already has the selected permisson.")
+
+    user_model.perm_id = change_permisson_request.perm_id
+    self.db.add(user_model)
+    self.db.commit()
+    return self.success.response("Permisson changed successfully!")
+
+
+

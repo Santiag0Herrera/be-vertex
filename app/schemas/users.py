@@ -9,3 +9,7 @@ class CreateUserRequest(BaseModel):
   last_name: str
   email: str
   phone: str
+
+class ChangePermissonRequest(BaseModel):
+  user_id: int
+  perm_id: int
