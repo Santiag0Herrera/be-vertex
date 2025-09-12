@@ -6,10 +6,7 @@ import datetime
 import jwt
 
 class InterBankingService:
-  req_user: dict
-
-  def __init__(self, req_user):
-    self.req_user = req_user
+  def __init__(self):
     self.client = requests
     self.raise_error = ErrorService()
     self.success = SuccessService()

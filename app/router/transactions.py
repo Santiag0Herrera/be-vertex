@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, Query
 from app.db.database import get_db
 from starlette import status
 from app.services.auth_service import get_current_user
-from app.schemas.transactions import DocumentRequest, MultipleDocumentRequest
+from app.schemas.transactions import DocumentRequest, MultipleDocumentRequest, UploadDocumentRequest
 from app.services.DBService import DBService
 
 router = APIRouter(
@@ -23,15 +23,16 @@ async def get_all_transactions(
     year: int = Query(..., gt=2000),
     day: int = Query(..., gt=0, lt=32)
 ):
+  print(user)
   db_service = DBService(db=db, req_user=user)
   transactions_model = db_service.trx.get_all(day, month, year)
   return transactions_model
 
 
 @router.post("/new", status_code=status.HTTP_201_CREATED)
-async def upload_new_document(db: db_dependency, document_request: DocumentRequest):
+async def upload_new_document(db: db_dependency, document_request: DocumentRequest, user: user_dependency):
   db_service = DBService(db=db, req_user=None)
-  trx_model = db_service.trx.create(document_request)
+  trx_model = db_service.trx.create(document_request, user)
   return trx_model
 
 @router.post("/multiple/new", status_code=status.HTTP_201_CREATED)
@@ -39,3 +40,10 @@ async def upload_multiple_new_document(db: db_dependency, user: user_dependency,
   db_service = DBService(db=db, req_user=user)
   trx_model = db_service.trx.create_multiple(multiple_trx_request)
   return trx_model
+
+@router.post("/upload-file", status_code=status.HTTP_201_CREATED)
+async def upload_new_file(db: db_dependency,  user: user_dependency, upload_document_request: UploadDocumentRequest):
+  db_service = DBService(db=db, req_user=user)
+  uploaded_file = await db_service.trx.upload_file(upload_document_request)
+  return uploaded_file
+  

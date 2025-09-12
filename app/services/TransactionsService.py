@@ -1,11 +1,12 @@
 from sqlalchemy.orm import Session
 from app.models import Trx, Users, CBU, Entity
 from sqlalchemy import extract
-from app.schemas.transactions import DocumentRequest, MultipleDocumentRequest
+from app.schemas.transactions import DocumentRequest, MultipleDocumentRequest, UploadDocumentRequest
 
 from .ErrorService import ErrorService
 from .SuccessService import SuccessService
 from .InterBankingService import InterBankingService
+from .N8NService import N8NService
 
 class TransactionsService:
   db: Session
@@ -18,7 +19,8 @@ class TransactionsService:
     self.req_user = req_user
     self.error = ErrorService()
     self.success = SuccessService()
-    self.ib_service = InterBankingService(req_user=req_user)
+    self.ib_service = InterBankingService()
+    self.n8n_service = N8NService()
   
   async def _verify_bank_movement(
     self,
@@ -32,7 +34,6 @@ class TransactionsService:
       customer_id=customer_id
     )
     return self.error.raise_if_none(movement_model, "Movment")
-
 
   def get_all(self, day, month, year):
     user_model = self.db.query(Users).filter(
@@ -51,7 +52,7 @@ class TransactionsService:
     }
     return self.success.response(result)
   
-  def create(self, document_request: DocumentRequest):
+  def create(self, document_request: DocumentRequest, user: dict):
     cbu_model = self.db.query(CBU).filter(
       CBU.cuit == document_request.receptor_cuit
     ).first() 
@@ -132,3 +133,7 @@ class TransactionsService:
       }
       return self.success.response(result)
   
+  async def upload_file(self, upload_document_request: UploadDocumentRequest):
+    response = await self.n8n_service.ai_extract_info(upload_document_request)
+    self.error.raise_if_none(response, "Document info")
+    return response

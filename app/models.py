@@ -1,6 +1,7 @@
 from sqlalchemy import Column, Integer, String, Float, ForeignKey
 from sqlalchemy.orm import relationship, declarative_base
 
+
 Base = declarative_base()
 
 # User Model
@@ -100,3 +101,12 @@ class Endpoints(Base):
     perm_id = Column(Integer, ForeignKey("permissions.id"))
 
     permission = relationship("Permission", back_populates="endpoints")
+
+class Logs(Base):
+    __tablename__ = "logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    datetime = Column(String, nullable=False)
+    endpoint = Column(String, nullable=False)
+    method = Column(String, nullable=False)
+    username = Column(String, nullable=False)

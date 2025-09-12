@@ -4,7 +4,8 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.status import HTTP_403_FORBIDDEN, HTTP_401_UNAUTHORIZED
 from jose import jwt, JWTError
 from app.db.database import SessionLocal
-from app.models import Endpoints, Permission
+from app.models import Endpoints, Permission, Logs
+from datetime import datetime
 import logging
 
 # Setup básico de logging
@@ -18,36 +19,36 @@ class PermissionMiddleware(BaseHTTPMiddleware):
         db = SessionLocal()
         try:
             path = request.url.path
+            method = request.method
             logging.info(f"🔒 Incoming request to: {path}")
 
-            # Paths públicos (sin auth)
             public_paths = ["/auth/", "/auth/token", "/docs", "/openapi.json", "/redoc"]
             if any(path.startswith(p) for p in public_paths):
+                # Log para rutas públicas (usuario anónimo)
+                _save_log(path, method, user="anonymous")
                 return await call_next(request)
 
             # Verificar token
             auth_header = request.headers.get("Authorization")
             if not auth_header or not auth_header.startswith("Bearer "):
                 logging.warning("❌ No Authorization header")
-                return JSONResponse(
-                    status_code=HTTP_403_FORBIDDEN,
-                    content={"detail": "No token provided"}
-                )
+                _save_log(path, method, user="no-token")
+                return JSONResponse(status_code=HTTP_403_FORBIDDEN, content={"detail": "No token provided"})
 
             token = auth_header.split(" ")[1]
             try:
                 payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-                logging.info(f"✅ Token payload")
+                logging.info("✅ Token payload")
             except JWTError as e:
                 logging.error(f"❌ JWT decoding error: {e}")
-                return JSONResponse(
-                    status_code=HTTP_401_UNAUTHORIZED,
-                    content={"detail": "Invalid token"}
-                )
+                _save_log(path, method, user="invalid-token")
+                return JSONResponse(status_code=HTTP_401_UNAUTHORIZED, content={"detail": "Invalid token"})
 
             perm_id = payload.get("perm_id")
             user_hierarchy = payload.get("hierarchy")
+            user_email = payload.get("sub") or "unknown"
             if perm_id is None or user_hierarchy is None:
+                _save_log(path, method, user=f"{user_email} (missing-claims)")
                 return JSONResponse(
                     status_code=HTTP_401_UNAUTHORIZED,
                     content={"detail": "Missing permission or hierarchy in token"}
@@ -66,18 +67,36 @@ class PermissionMiddleware(BaseHTTPMiddleware):
 
             if not has_access:
                 logging.warning(f"⛔ Access denied for perm_id={perm_id} to path={path}")
-                return JSONResponse(
-                    status_code=HTTP_403_FORBIDDEN,
-                    content={"detail": "Permission denied"}
-                )
+                _save_log(path, method, user=f"{user_email} (denied)")
+                return JSONResponse(status_code=HTTP_403_FORBIDDEN, content={"detail": "Permission denied"})
 
-            return await call_next(request)
+            # Request autorizada: llamamos la ruta y logeamos con status
+            response = await call_next(request)
+            _save_log(path, method, user=user_email)
+            return response
 
         except Exception as e:
             logging.error(f"🔥 Middleware error: {e}")
-            return JSONResponse(
-                status_code=HTTP_403_FORBIDDEN,
-                content={"detail": f"Middleware failed: {str(e)}"}
-            )
+            # Logueamos el fallo del middleware también
+            try:
+                _save_log(request.url.path, request.method, user="middleware-error")
+            except Exception:
+                pass
+            return JSONResponse(status_code=HTTP_403_FORBIDDEN, content={"detail": f"Middleware failed: {str(e)}"})
         finally:
             db.close()
+
+def _save_log(endpoint: str, method: str, user: str):
+    db = SessionLocal()
+    try:
+        log = Logs(
+            datetime=datetime.utcnow().isoformat(),
+            endpoint=endpoint,
+            method=method,
+            username=user
+        )
+        db.add(log)
+        db.commit()
+    except Exception as e:
+        # No bloqueamos la request por un error de logging
+        logging.error(f"⚠️ Failed to write log: {e}")

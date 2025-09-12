@@ -15,3 +15,8 @@ class DocumentRequest(BaseModel):
 
 class MultipleDocumentRequest(BaseModel):
   transactions: list[DocumentRequest]
+
+class UploadDocumentRequest(BaseModel):
+  base64: str
+  name: str
+  ext: str

@@ -48,6 +48,7 @@ async def delete_user(user: user_dependency, db: db_dependency, user_id: int):
   delete_user_model = db_service.users.delete(user_id)
   return delete_user_model
 
+
 @router.put("/changePermisson", status_code=status.HTTP_200_OK)
 async def change_permisson(user: user_dependency, db: db_dependency, change_permisson_request: ChangePermissonRequest):
   db_service = DBService(db=db, req_user=user)
