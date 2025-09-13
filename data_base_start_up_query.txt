@@ -1,0 +1,134 @@
+-- 1) Productos
+CREATE TABLE products (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(255) NOT NULL,
+    description VARCHAR(255) NOT NULL,
+    img VARCHAR(255) NOT NULL,
+    path VARCHAR(255) NOT NULL
+);
+
+-- 2) Moneda
+CREATE TABLE currency (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(255) NOT NULL
+);
+
+-- 3) Permisos (depende de products)
+CREATE TABLE permissions (
+    id SERIAL PRIMARY KEY,
+    product INTEGER REFERENCES products(id),
+    level VARCHAR(255) NOT NULL,
+    hierarchy INTEGER NOT NULL
+);
+
+-- 4) CBU
+CREATE TABLE cbus (
+    id SERIAL PRIMARY KEY,
+    nro VARCHAR(255) UNIQUE NOT NULL,
+    banco VARCHAR(255) NOT NULL,
+    alias VARCHAR(255) NOT NULL,
+    cuit VARCHAR(255) NOT NULL
+);
+
+-- 5) Entidades (depende de cbus)
+CREATE TABLE entities (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(255) NOT NULL,
+    mail VARCHAR(255) NOT NULL,
+    phone VARCHAR(255),
+    products VARCHAR(255),
+    status VARCHAR(255),
+    cbu_id INTEGER REFERENCES cbus(id)
+);
+
+-- 6) Usuarios (depende de permissions, entities)
+CREATE TABLE users (
+    id SERIAL PRIMARY KEY,
+    first_name VARCHAR(255) NOT NULL,
+    last_name VARCHAR(255) NOT NULL,
+    email VARCHAR(255) UNIQUE NOT NULL,
+    hashed_password VARCHAR(255) NOT NULL,
+    phone VARCHAR(255),
+    perm_id INTEGER REFERENCES permissions(id),
+    entity_id INTEGER REFERENCES entities(id)
+);
+
+-- 7) Clientes (depende de permissions, entities)
+CREATE TABLE clients (
+    id SERIAL PRIMARY KEY,
+    first_name VARCHAR(255) NOT NULL,
+    last_name VARCHAR(255) NOT NULL,
+    email VARCHAR(255) UNIQUE NOT NULL,
+    hashed_password VARCHAR(255) NOT NULL,
+    phone VARCHAR(255),
+    perm_id INTEGER NOT NULL REFERENCES permissions(id),
+    entity_id INTEGER NOT NULL REFERENCES entities(id)
+);
+
+-- 8) Saldos por cliente (depende de clients, currency)
+CREATE TABLE customers_balance (
+    id SERIAL PRIMARY KEY,
+    client_id INTEGER UNIQUE NOT NULL REFERENCES clients(id),
+    balance_amount DOUBLE PRECISION NOT NULL DEFAULT 0.0,
+    balance_currency_id INTEGER NOT NULL REFERENCES currency(id),
+    last_update TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 9) Endpoints (depende de permissions)
+CREATE TABLE endpoints (
+    id SERIAL PRIMARY KEY,
+    path VARCHAR(255) UNIQUE NOT NULL,
+    perm_id INTEGER REFERENCES permissions(id)
+);
+
+-- 10) Transacciones (depende de entities, clients)
+CREATE TABLE trx (
+    id SERIAL PRIMARY KEY,
+    trx_id VARCHAR(255) UNIQUE,
+    emisor_cbu VARCHAR(255),
+    emisor_name VARCHAR(255) NOT NULL,
+    emisor_cuit VARCHAR(255) NOT NULL,
+    receptor_cbu VARCHAR(255) NOT NULL,
+    entity_id INTEGER REFERENCES entities(id),
+    client_id INTEGER REFERENCES clients(id),
+    amount DOUBLE PRECISION NOT NULL,
+    date VARCHAR(255) NOT NULL,
+    status VARCHAR(255) NOT NULL
+);
+
+-- 11) Pagos (depende de users)
+CREATE TABLE payments (
+    id SERIAL PRIMARY KEY,
+    payee_user_id INTEGER REFERENCES users(id),
+    amount DOUBLE PRECISION NOT NULL,
+    date TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    status VARCHAR(255) NOT NULL
+);
+
+-- 12) Logs
+CREATE TABLE logs (
+    id SERIAL PRIMARY KEY,
+    datetime VARCHAR(255) NOT NULL,
+    endpoint VARCHAR(255) NOT NULL,
+    method VARCHAR(255) NOT NULL,
+    username VARCHAR(255) NOT NULL
+);
+
+-- (Opcional) Índices útiles en FKs para performance
+CREATE INDEX idx_users_perm_id ON users(perm_id);
+CREATE INDEX idx_users_entity_id ON users(entity_id);
+
+CREATE INDEX idx_clients_perm_id ON clients(perm_id);
+CREATE INDEX idx_clients_entity_id ON clients(entity_id);
+
+CREATE INDEX idx_entities_cbu_id ON entities(cbu_id);
+
+CREATE INDEX idx_customers_balance_client_id ON customers_balance(client_id);
+CREATE INDEX idx_customers_balance_currency_id ON customers_balance(balance_currency_id);
+
+CREATE INDEX idx_endpoints_perm_id ON endpoints(perm_id);
+
+CREATE INDEX idx_trx_entity_id ON trx(entity_id);
+CREATE INDEX idx_trx_client_id ON trx(client_id);
+
+CREATE INDEX idx_payments_payee_user_id ON payments(payee_user_id);
