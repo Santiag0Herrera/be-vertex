@@ -1,4 +1,5 @@
-from sqlalchemy import Column, Integer, String, Float, ForeignKey
+from datetime import datetime
+from sqlalchemy import Column, DateTime, Integer, String, Float, ForeignKey
 from sqlalchemy.orm import relationship, declarative_base
 
 
@@ -75,10 +76,10 @@ class Trx(Base):
     emisor_cuit = Column(String, nullable=False)
     receptor_cbu = Column(String, nullable=False)
     entity_id = Column(Integer, ForeignKey("entities.id"))
+    client_id = Column(Integer, ForeignKey("clients.id"))
     amount = Column(Float, nullable=False)
     date = Column(String, nullable=False)
     status = Column(String, nullable=False)
-
 
 # CBU Model
 class CBU(Base):
@@ -91,7 +92,6 @@ class CBU(Base):
     cuit = Column(String, nullable=False)
 
     entity = relationship("Entity", back_populates="cbu", uselist=False)
-
 
 class Endpoints(Base):
     __tablename__ = "endpoints"
@@ -110,3 +110,52 @@ class Logs(Base):
     endpoint = Column(String, nullable=False)
     method = Column(String, nullable=False)
     username = Column(String, nullable=False)
+
+class Payments(Base):
+    __tablename__= "payments"
+
+    id = Column(Integer, primary_key=True, index=True)
+    payee_user_id = Column(Integer, ForeignKey("users.id"))
+    amount = Column(Float, nullable=False)
+    date = Column(DateTime, default=datetime.utcnow)
+    status = Column(String, nullable=False)
+
+    payee_user = relationship("Users", back_populates="payments")
+
+class Clients(Base):
+    __tablename__ = "clients"
+
+    id = Column(Integer, primary_key=True, index=True)
+    first_name = Column(String, nullable=False)
+    last_name = Column(String, nullable=False)
+    email = Column(String, unique=True, nullable=False)
+    hashed_password = Column(String, nullable=False)
+    phone = Column(String)
+    perm_id = Column(Integer, ForeignKey("permissions.id"), nullable=False)
+    entity_id = Column(Integer, ForeignKey("entities.id"), nullable=False)
+
+    # relaciones
+    entity = relationship("Entity", back_populates="clients")
+    permission = relationship("Permission", back_populates="clients")
+    balance = relationship("CustomersBalance", back_populates="clients", uselist=False)
+
+
+class CustomersBalance(Base):
+    __tablename__ = "customers_balance"
+
+    id = Column(Integer, primary_key=True, index=True)
+    client_id = Column(Integer, ForeignKey("clients.id"), unique=True, nullable=False)
+    balance_amount = Column(Float, nullable=False, default=0.0)
+    balance_currency_id = Column(Integer, ForeignKey("currency.id"), nullable=False)
+    last_update = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+    client = relationship("Clients", back_populates="balance")
+    currency = relationship("Currency", back_populates="balances")
+
+class Currency(Base):
+    __tablename__ = "currency"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, nullable=False)
+
+    balances = relationship("CustomersBalance", back_populates="currency")
