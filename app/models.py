@@ -2,7 +2,6 @@ from datetime import datetime
 from sqlalchemy import Column, DateTime, Integer, String, Float, ForeignKey
 from sqlalchemy.orm import relationship, declarative_base
 
-
 Base = declarative_base()
 
 # User Model
@@ -20,6 +19,7 @@ class Users(Base):
 
     entity = relationship("Entity", back_populates="users")
     permission = relationship("Permission", back_populates="users")
+    payments = relationship("Payments", back_populates="payee_user")  # ⇦ contraparte de Payments.payee_user
 
 
 # Entity Model
@@ -35,7 +35,9 @@ class Entity(Base):
     cbu_id = Column(Integer, ForeignKey("cbus.id"))
 
     users = relationship("Users", back_populates="entity")
-    cbu = relationship("CBU", back_populates="entity")
+    cbu = relationship("CBU", back_populates="entity", uselist=False)
+    clients = relationship("Clients", back_populates="entity")          # ⇦ nuevo
+    trxs = relationship("Trx", back_populates="entity")                 # ⇦ nuevo
 
 
 # Permission Model
@@ -50,6 +52,7 @@ class Permission(Base):
     users = relationship("Users", back_populates="permission")
     product_rel = relationship("Product", back_populates="permissions")
     endpoints = relationship("Endpoints", back_populates="permission")
+    clients = relationship("Clients", back_populates="permission")      # ⇦ nuevo
 
 
 # Product Model
@@ -81,6 +84,10 @@ class Trx(Base):
     date = Column(String, nullable=False)
     status = Column(String, nullable=False)
 
+    entity = relationship("Entity", back_populates="trxs")              # ⇦ nuevo
+    client = relationship("Clients", back_populates="trxs")             # ⇦ nuevo
+
+
 # CBU Model
 class CBU(Base):
     __tablename__ = "cbus"
@@ -93,6 +100,7 @@ class CBU(Base):
 
     entity = relationship("Entity", back_populates="cbu", uselist=False)
 
+
 class Endpoints(Base):
     __tablename__ = "endpoints"
 
@@ -101,6 +109,7 @@ class Endpoints(Base):
     perm_id = Column(Integer, ForeignKey("permissions.id"))
 
     permission = relationship("Permission", back_populates="endpoints")
+
 
 class Logs(Base):
     __tablename__ = "logs"
@@ -111,6 +120,7 @@ class Logs(Base):
     method = Column(String, nullable=False)
     username = Column(String, nullable=False)
 
+
 class Payments(Base):
     __tablename__= "payments"
 
@@ -120,7 +130,8 @@ class Payments(Base):
     date = Column(DateTime, default=datetime.utcnow)
     status = Column(String, nullable=False)
 
-    payee_user = relationship("Users", back_populates="payments")
+    payee_user = relationship("Users", back_populates="payments")       # ⇦ contraparte en Users.payments
+
 
 class Clients(Base):
     __tablename__ = "clients"
@@ -134,10 +145,10 @@ class Clients(Base):
     perm_id = Column(Integer, ForeignKey("permissions.id"), nullable=False)
     entity_id = Column(Integer, ForeignKey("entities.id"), nullable=False)
 
-    # relaciones
     entity = relationship("Entity", back_populates="clients")
     permission = relationship("Permission", back_populates="clients")
-    balance = relationship("CustomersBalance", back_populates="clients", uselist=False)
+    balance = relationship("CustomersBalance", back_populates="client", uselist=False)  # ⇦ balance⇄client
+    trxs = relationship("Trx", back_populates="client")                                  # ⇦ nuevo
 
 
 class CustomersBalance(Base):
@@ -149,8 +160,9 @@ class CustomersBalance(Base):
     balance_currency_id = Column(Integer, ForeignKey("currency.id"), nullable=False)
     last_update = Column(DateTime, nullable=False, default=datetime.utcnow)
 
-    client = relationship("Clients", back_populates="balance")
+    client = relationship("Clients", back_populates="balance")          # ⇦ contraparte correcta
     currency = relationship("Currency", back_populates="balances")
+
 
 class Currency(Base):
     __tablename__ = "currency"
