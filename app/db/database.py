@@ -1,13 +1,12 @@
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.orm import declarative_base
-import os
 
-# SQLALCHEMY_DATABASE_URL = "postgresql://vertex:vertex2025@cddatabase.cc1ao8osa9zo.us-east-1.rds.amazonaws.com:5432/cddatabase?sslmode=require"
-
-SQLALCHEMY_DATABASE_URL = os.getenv("DATABASE_URL")  # postgresql://user:pass@db:5432/dbname
+# SQLALCHEMY_DATABASE_URL = "postgresql://vertexmaster:vertex1234$$@vertex-database-testing.cc1ao8osa9zo.us-east-1.rds.amazonaws.com:5432/cddatabase?sslmode=require"
+SQLALCHEMY_DATABASE_URL = "postgresql://postgres:test123!@localhost/VertexApplicationDatabase"
 
 engine = create_engine(SQLALCHEMY_DATABASE_URL)
+
 SessionLocal = sessionmaker(autoflush=False, autocommit=False, bind=engine)
 Base = declarative_base()
 
