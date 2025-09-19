@@ -23,7 +23,6 @@ async def get_all_transactions(
     year: int = Query(..., gt=2000),
     day: int = Query(..., gt=0, lt=32)
 ):
-  print(user)
   db_service = DBService(db=db, req_user=user)
   transactions_model = db_service.trx.get_all(day, month, year)
   return transactions_model

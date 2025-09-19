@@ -1,12 +1,15 @@
-from app.models import Permission, Users
-
+from typing import List
+from sqlalchemy import select
+from app.models import Clients
 from sqlalchemy.orm import Session
 from .ErrorService import ErrorService
 from .SuccessService import SuccessService
+from app.schemas.auth import ReqUser
+from app.schemas.clients import ClientResponse
 
 class ClientService():
   db: Session
-  req_user: dict
+  req_user: ReqUser
   error: ErrorService
   success: SuccessService
 
@@ -16,16 +19,7 @@ class ClientService():
     self.error = ErrorService()
     self.success = SuccessService()
   
-  def get_all(self):
-    perm_model = self.db.query(Permission).filter(
-      Permission.level == 'client'
-    ).first()
-    self.error.raise_if_none(perm_model, "Permissions")
-    
-    clients_model = self.db.query(Users).filter(
-      Users.perm_id == perm_model.id, 
-      Users.entity_id == self.req_user.get('entity_id')
-    ).all()
-    self.error.raise_if_none(clients_model, "Clients")
-    
+  def get_all(self) -> List[ClientResponse]:
+    stmt = select(Clients).where(Clients.entity_id == self.req_user.get("entity_id"))
+    clients_model = self.db.execute(stmt).scalars().all()
     return clients_model
