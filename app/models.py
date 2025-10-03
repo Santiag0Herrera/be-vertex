@@ -129,9 +129,14 @@ class Payments(Base):
     amount = Column(Float, nullable=False)
     date = Column(DateTime, default=datetime.utcnow)
     status = Column(String, nullable=False)
+    customer_balance_id = Column(Integer, ForeignKey("customers_balance.id"))
+    currency_id = Column(Integer, ForeignKey("currency.id"))
+    entity_id = Column(Integer, ForeignKey("entities.id"), nullable=False)
 
-    payee_user = relationship("Users", back_populates="payments")       # ⇦ contraparte en Users.payments
-
+    payee_user = relationship("Users", back_populates="payments")
+    customer_balance = relationship("CustomersBalance")
+    currency = relationship("Currency")
+    entity = relationship("Entity")
 
 class Clients(Base):
     __tablename__ = "clients"

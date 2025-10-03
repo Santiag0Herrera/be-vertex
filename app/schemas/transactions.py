@@ -20,3 +20,8 @@ class UploadDocumentRequest(BaseModel):
   base64: str
   name: str
   ext: str
+
+class MovementsRequest(BaseModel):
+  account_number: str
+  bank_number: str
+  customer_id: str

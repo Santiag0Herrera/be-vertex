@@ -60,7 +60,7 @@ class InterBankingService:
     if not self.token or self._is_token_expired(self.token):
       self.token = await self._authenticate()
 
-    url = f"{self.ib_api_url}{account_number}/movements/anteriores?bank-number={bank_number}&customer-id={customer_id}"
+    url = f"{self.ib_api_url}{account_number}/movements/anteriores?bank-number={bank_number}&customer-id={customer_id}&page=50"
     payload = {}
     headers = {
       'Accept': 'application/json',

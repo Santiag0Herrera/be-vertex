@@ -4,6 +4,7 @@ from .TransactionsService import TransactionsService
 from .ProductsService import ProductsService
 from .ClientsService import ClientService
 from .EntitiesService import EntitiesService
+from .PaymentService import PaymentService
 
 class DBService:
   db: Session
@@ -12,6 +13,7 @@ class DBService:
   trx: TransactionsService
   client: ClientService
   entities: EntitiesService
+  payments: PaymentService
   
   def __init__(self, db, req_user):
     self.db = db
@@ -21,3 +23,4 @@ class DBService:
     self.products = ProductsService(db, req_user)
     self.client = ClientService(db, req_user)
     self.entities = EntitiesService(db, req_user)
+    self.payments = PaymentService(db, req_user)
