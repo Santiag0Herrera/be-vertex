@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.db.database import create_tables
-from app.router import auth, transactions, users, entities, products, clients, payments
+from app.router import auth, transactions, users, entities, products, clients, payments, balance
 from app.middlewares.PermissionMiddleware import PermissionMiddleware
 from dotenv import load_dotenv
 
@@ -25,3 +25,4 @@ app.include_router(entities.router)
 app.include_router(products.router)
 app.include_router(clients.router)
 app.include_router(payments.router)
+app.include_router(balance.router)

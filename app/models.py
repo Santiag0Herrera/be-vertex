@@ -165,7 +165,7 @@ class CustomersBalance(Base):
     balance_currency_id = Column(Integer, ForeignKey("currency.id"), nullable=False)
     last_update = Column(DateTime, nullable=False, default=datetime.utcnow)
 
-    client = relationship("Clients", back_populates="balance")          # ⇦ contraparte correcta
+    client = relationship("Clients", back_populates="balance", lazy="joined")
     currency = relationship("Currency", back_populates="balances")
 
 

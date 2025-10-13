@@ -5,6 +5,7 @@ from .ProductsService import ProductsService
 from .ClientsService import ClientService
 from .EntitiesService import EntitiesService
 from .PaymentService import PaymentService
+from .CustomerBalanceService import CustomerBalanceService
 
 class DBService:
   db: Session
@@ -14,7 +15,7 @@ class DBService:
   client: ClientService
   entities: EntitiesService
   payments: PaymentService
-  
+  balance: CustomerBalanceService
   def __init__(self, db, req_user):
     self.db = db
     self.req_user = req_user
@@ -24,3 +25,4 @@ class DBService:
     self.client = ClientService(db, req_user)
     self.entities = EntitiesService(db, req_user)
     self.payments = PaymentService(db, req_user)
+    self.balance = CustomerBalanceService(db, req_user)
