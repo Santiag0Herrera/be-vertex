@@ -3,7 +3,6 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.orm import declarative_base
 import os
 
-# SQLALCHEMY_DATABASE_URL = "postgresql://vertexmaster:vertex1234$$@vertex-database-testing.cc1ao8osa9zo.us-east-1.rds.amazonaws.com:5432/cddatabase?sslmode=require"
 DATABASE_URL = os.getenv("DATABASE_URL")
 
 engine = create_engine(DATABASE_URL)

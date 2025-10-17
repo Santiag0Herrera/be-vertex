@@ -4,6 +4,7 @@ from app.db.database import create_tables
 from app.router import auth, transactions, users, entities, products, clients, payments, balance
 from app.middlewares.PermissionMiddleware import PermissionMiddleware
 from dotenv import load_dotenv
+import os
 
 load_dotenv(dotenv_path="dev.env")  # Esto carga las variables al entorno
 app = FastAPI()
@@ -11,7 +12,7 @@ app = FastAPI()
 app.add_middleware(PermissionMiddleware)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[os.getenv("ALLOW_ORIGINS")],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
