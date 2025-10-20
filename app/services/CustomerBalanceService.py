@@ -64,23 +64,33 @@ class CustomerBalanceService:
       )
       .first()
     )
-    self.error.raise_if_none(balance_model)
+
+    if balance_model is None:
+      return {"status": "ok", "data": None}
     
     # Movimientos de ingresos (TRX)
-    trxs = self.db.query(Trx).filter(Trx.client_id == client_id).all()
+    trxs = (
+      self.db.query(Trx)
+      .filter(Trx.client_id == client_id)
+      .limit(20)
+      .all()
+    )
+
     # Pagos hechos (EGRESOS)
     payments = (
       self.db.query(Payments)
       .join(CustomersBalance)
       .filter(CustomersBalance.client_id == client_id)
+      .limit(20)
       .all()
     )
+
     # Combinar ambos en un solo resultado (opcional: los podés ordenar por fecha después)
     combined = []
     for trx in trxs:
       combined.append({
-        "type": "Transacción",
-        "amount": trx.amount,
+        "type": "Transaccion",
+        "amount": f"{balance_model.currency.name} {trx.amount}",
         "date": trx.date,
         "status": trx.status,
       })
@@ -94,9 +104,9 @@ class CustomerBalanceService:
       })
 
     # Ordenar por fecha descendente
-    combined.sort(key=lambda x: x["date"], reverse=True)
+    combined.sort(key=lambda x: str(x["date"]), reverse=True)
 
-    return {
+    return {"status": "ok", "data": {
       "balance": balance_model,
-      "movements": combined
-    }
+      "movements": combined[:10]
+    }}
