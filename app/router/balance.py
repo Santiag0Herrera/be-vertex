@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends
 from app.db.database import get_db
 from app.services.auth_service import get_current_user
 from app.services.DBService import DBService 
+from app.schemas.customerBalance import CustomerBalanceCreateRequest
 
 router = APIRouter(
   prefix='/balance',
@@ -25,3 +26,17 @@ async def get_balance_by_client_id(db: db_dependency, user: user_dependency, cli
   db_service = DBService(db=db, req_user=user)
   balance_model = db_service.balance.get_all_movements(client_id=client_id)
   return balance_model
+
+@router.post("/create")
+async def create_new_balance_account(
+  db: db_dependency, 
+  user: user_dependency, 
+  client_id: int, 
+  customer_balance_request: CustomerBalanceCreateRequest
+):
+  db_service = DBService(db=db, req_user=user)
+  new_balance_request = db_service.balance.create(
+    client_id=client_id,
+    customer_balance_request=customer_balance_request
+  )
+  return new_balance_request

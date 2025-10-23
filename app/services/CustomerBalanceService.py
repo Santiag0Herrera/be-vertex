@@ -3,8 +3,7 @@ from .SuccessService import SuccessService
 from sqlalchemy.orm import Session
 from app.models import CustomersBalance, Clients, Payments, Trx
 from sqlalchemy.orm import joinedload
-from fastapi import HTTPException
-
+from app.schemas.customerBalance import CustomerBalanceCreateRequest
 
 class CustomerBalanceService:
   def __init__(self, db: Session, req_user: dict):
@@ -35,7 +34,6 @@ class CustomerBalanceService:
     self.db.add(balance_model)
     self.db.commit()
 
-
   def get_all(self):
     entity_id = self.req_user.get("entity_id")
     balances_model = (
@@ -51,7 +49,6 @@ class CustomerBalanceService:
     )
     return balances_model
   
-
   def get_all_movements(self, client_id: int):
     balance_model = (
       self.db.query(CustomersBalance)
@@ -110,3 +107,22 @@ class CustomerBalanceService:
       "balance": balance_model,
       "movements": combined[:10]
     }}
+  
+  def create(
+    self, 
+    client_id: int, 
+    customer_balance_request: CustomerBalanceCreateRequest
+  ):
+    client_model = self.db.query(Clients).filter(Clients.id == client_id).first()
+    
+    if client_model is None:
+      return self.error.raise_not_found("Client")
+    
+    create_customer_balance = CustomersBalance(
+      client_id=client_model.id,
+      balance_amount=customer_balance_request.balance_amount,
+      balance_currency_id=customer_balance_request.balance_currency_id
+    )
+    self.db.add(create_customer_balance)
+    self.db.commit()
+    return {'status': 'ok', 'result': "Balance creado correctamente."}
