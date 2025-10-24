@@ -1,6 +1,6 @@
 from typing import List
 from sqlalchemy import select
-from app.models import Clients
+from app.models import Clients, Users
 from sqlalchemy.orm import Session
 from .ErrorService import ErrorService
 from .SuccessService import SuccessService
@@ -32,18 +32,25 @@ class ClientService():
     Creates a new client in the requesting client's entity.
     """
     client_exists_model = self.db.query(Clients).filter(
-      Clients.email == new_client_request.email
+      Clients.email == new_client_request.email.strip().lower()
     ).first()
 
     if client_exists_model:
       self.error.raise_conflict(f"Cliente {client_exists_model.email} ya existe.")
+
+    user_exists_model = self.db.query(Users).filter(
+      Users.email == new_client_request.email.strip().lower()
+    ).first()
+
+    if user_exists_model:
+      self.error.raise_conflict(f"Usuario {user_exists_model.email} ya existe.")
     
     auto_generated_password = (new_client_request.first_name[:2] + new_client_request.last_name + "123").lower()
 
     create_client_model = Clients(
       first_name=new_client_request.first_name,
       last_name=new_client_request.last_name,
-      email=new_client_request.email,
+      email=new_client_request.email.strip().lower(),
       hashed_password=bcrypt_context.hash(auto_generated_password),
       phone=new_client_request.phone,
       perm_id=2,

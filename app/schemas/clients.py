@@ -17,4 +17,3 @@ class NewClientRequest(BaseModel):
   last_name: str
   email: str
   phone: str
-  entity_id: int

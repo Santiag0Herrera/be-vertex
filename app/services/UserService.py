@@ -69,7 +69,7 @@ class UserService():
     """
     Creates a new user in the requesting user's entity.
     """
-    user_exists_model = self.db.query(Users).filter(Users.email == create_user_request.email).first()
+    user_exists_model = self.db.query(Users).filter(Users.email.lower() == create_user_request.email).first()
   
     if user_exists_model:
       self.error.raise_conflict(f"Usuario {create_user_request.email} ya existe.")
@@ -79,7 +79,7 @@ class UserService():
     create_user_model = Users(
       first_name=create_user_request.first_name,
       last_name=create_user_request.last_name,
-      email=create_user_request.email,
+      email=create_user_request.email.lower(),
       hashed_password=bcrypt_context.hash(auto_generated_password),
       phone=create_user_request.phone,
       perm_id=3,
