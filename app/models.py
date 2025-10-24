@@ -83,9 +83,11 @@ class Trx(Base):
     amount = Column(Float, nullable=False)
     date = Column(String, nullable=False)
     status = Column(String, nullable=False)
+    account_id = Column(Integer, ForeignKey("customers_balance.id"), nullable=False)
 
-    entity = relationship("Entity", back_populates="trxs")              # ⇦ nuevo
-    client = relationship("Clients", back_populates="trxs")             # ⇦ nuevo
+    entity = relationship("Entity", back_populates="trxs")
+    client = relationship("Clients", back_populates="trxs")
+    account = relationship("CustomersBalance")
 
 
 # CBU Model

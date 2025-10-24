@@ -49,12 +49,12 @@ class CustomerBalanceService:
     )
     return balances_model
   
-  def get_all_movements(self, client_id: int):
+  def get_all_movements(self, account_id: int):
     balance_model = (
       self.db.query(CustomersBalance)
       .join(CustomersBalance.client)
       .join(CustomersBalance.currency)
-      .filter(CustomersBalance.client_id == client_id)
+      .filter(CustomersBalance.id == account_id)
       .options(
         joinedload(CustomersBalance.client), 
         joinedload(CustomersBalance.currency)
@@ -68,17 +68,14 @@ class CustomerBalanceService:
     # Movimientos de ingresos (TRX)
     trxs = (
       self.db.query(Trx)
-      .filter(Trx.client_id == client_id)
-      .limit(20)
+      .filter(Trx.account_id == balance_model.id)
       .all()
     )
 
     # Pagos hechos (EGRESOS)
     payments = (
       self.db.query(Payments)
-      .join(CustomersBalance)
-      .filter(CustomersBalance.client_id == client_id)
-      .limit(20)
+      .filter(Payments.customer_balance_id == balance_model.id)
       .all()
     )
 

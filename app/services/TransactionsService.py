@@ -1,7 +1,8 @@
-from sqlalchemy.orm import Session
-from app.models import Trx, Users, CBU, Entity
+from sqlalchemy.orm import Session, joinedload
+from app.models import Trx, Users, CBU, Entity, CustomersBalance
 from sqlalchemy import extract
 from app.schemas.transactions import DocumentRequest, MultipleDocumentRequest, UploadDocumentRequest
+
 
 from .ErrorService import ErrorService
 from .SuccessService import SuccessService
@@ -39,12 +40,19 @@ class TransactionsService:
     user_model = self.db.query(Users).filter(
       Users.id == self.req_user.get('id')
     ).first()
-    transactions_model = self.db.query(Trx).filter(
+
+    transactions_model = self.db.query(Trx).options(
+      joinedload(Trx.account).joinedload(CustomersBalance.currency)
+    ).join(
+      CustomersBalance,
+      Trx.account_id == CustomersBalance.id
+    ).filter(
       Trx.entity_id == user_model.entity_id,
       extract('month', Trx.date) == month,
       extract('year', Trx.date) == year,
       extract('day', Trx.date) == day,
     ).all()
+    
     day_total_amount = sum(transaction.amount for transaction in transactions_model)
     result = {
       "transactions": transactions_model,
@@ -53,6 +61,11 @@ class TransactionsService:
     return self.success.response(result)
   
   def create(self, document_request: DocumentRequest, user: dict):
+    account_model = self.db.query(CustomersBalance).filter(
+      CustomersBalance.id == document_request.account_id
+    )
+    self.error.raise_if_none(account_model, "Clinet Account")
+
     cbu_model = self.db.query(CBU).filter(
       CBU.cuit == document_request.receptor_cuit
     ).first() 
@@ -77,6 +90,7 @@ class TransactionsService:
       amount=document_request.amount,
       date=document_request.date,
       trx_id=document_request.trx_id,
+      account_id=document_request.account_id,
       status="pendiente"
     )
     self.db.add(create_user_model)
@@ -85,6 +99,11 @@ class TransactionsService:
   
   def create_multiple(self, multiple_trx_request: MultipleDocumentRequest):
       trx_ids = [doc.trx_id for doc in multiple_trx_request.transactions]
+
+      account_model = self.db.query(CustomersBalance).filter(
+        CustomersBalance.id == multiple_trx_request.account_id
+      )
+      self.error.raise_if_none(account_model, "Clinet Account")
 
       entity_model = self.db.query(Entity).filter(
         Entity.cbu_id == self.req_user.get('entity_id')
@@ -117,6 +136,7 @@ class TransactionsService:
             amount=doc.amount,
             date=doc.date,
             trx_id=doc.trx_id,
+            account_id=multiple_trx_request.account_id,
             status="pendiente"
           )
           new_trx.append(trx_model)

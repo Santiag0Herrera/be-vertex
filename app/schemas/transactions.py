@@ -13,8 +13,12 @@ class DocumentRequest(BaseModel):
   receptor_cbu: Optional[str] = Field(None, pattern=r"^\d{22}$")
   date: dt_date = Field(..., description="Transaction date in YYYY-MM-DD format")
 
+class MultipleDocumentRequest(DocumentRequest):
+  account_id: int
+
 class MultipleDocumentRequest(BaseModel):
   transactions: list[DocumentRequest]
+  account_id: int
 
 class UploadDocumentRequest(BaseModel):
   base64: str

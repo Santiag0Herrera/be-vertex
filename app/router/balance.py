@@ -22,9 +22,9 @@ async def get_all_clients_balance(db: db_dependency, user: user_dependency):
   return balance_model
 
 @router.get("/detail")
-async def get_balance_by_client_id(db: db_dependency, user: user_dependency, client_id: int):
+async def get_balance_by_client_id(db: db_dependency, user: user_dependency, account_id: int):
   db_service = DBService(db=db, req_user=user)
-  balance_model = db_service.balance.get_all_movements(client_id=client_id)
+  balance_model = db_service.balance.get_all_movements(account_id=account_id)
   return balance_model
 
 @router.post("/create")
