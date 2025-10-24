@@ -82,7 +82,7 @@ class UserService():
       email=create_user_request.email,
       hashed_password=bcrypt_context.hash(auto_generated_password),
       phone=create_user_request.phone,
-      perm_id=2,
+      perm_id=3,
       entity_id=self.req_user.get('entity_id')
     )
     self.db.add(create_user_model)

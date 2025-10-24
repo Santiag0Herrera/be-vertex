@@ -1,9 +1,9 @@
 from typing import Annotated
 from sqlalchemy.orm import Session
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from app.db.database import get_db
 from starlette import status
-from app.schemas.clients import ClientResponse
+from app.schemas.clients import ClientResponse, NewClientRequest
 from app.services.auth_service import get_current_user
 from app.services.DBService import DBService 
 
@@ -17,10 +17,16 @@ user_dependency = Annotated[dict, Depends(get_current_user)]
 
 @router.get(
     "/all", 
-    response_model=list[ClientResponse],  # 👈 esto es lo que faltaba
+    response_model=list[ClientResponse],
     status_code=status.HTTP_200_OK
 )
 async def get_all_clients(db: db_dependency, user: user_dependency):
   db_service = DBService(db=db, req_user=user)
   clients_model = db_service.client.get_all()
   return clients_model
+
+@router.post("/create", status_code=status.HTTP_201_CREATED)
+async def create_new_client(db: db_dependency, user: user_dependency, new_client_request: NewClientRequest):
+  db_Service = DBService(db=db, req_user=user)
+  create_client_model = db_Service.client.create(new_client_request)
+  return create_client_model
