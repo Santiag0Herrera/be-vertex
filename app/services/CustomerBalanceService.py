@@ -106,18 +106,17 @@ class CustomerBalanceService:
     }}
   
   def create(
-    self, 
-    client_id: int, 
+    self,
     customer_balance_request: CustomerBalanceCreateRequest
   ):
-    client_model = self.db.query(Clients).filter(Clients.id == client_id).first()
+    client_model = self.db.query(Clients).filter(Clients.id == customer_balance_request.client_id).first()
     
     if client_model is None:
       return self.error.raise_not_found("Client")
     
     create_customer_balance = CustomersBalance(
       client_id=client_model.id,
-      balance_amount=customer_balance_request.balance_amount,
+      balance_amount=0,
       balance_currency_id=customer_balance_request.balance_currency_id
     )
     self.db.add(create_customer_balance)
