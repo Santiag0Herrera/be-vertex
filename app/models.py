@@ -32,13 +32,22 @@ class Entity(Base):
     phone = Column(String)
     products = Column(String)
     status = Column(String)
-    cbu_id = Column(Integer, ForeignKey("cbus.id"))
 
     users = relationship("Users", back_populates="entity")
-    cbu = relationship("CBU", back_populates="entity", uselist=False)
-    clients = relationship("Clients", back_populates="entity")          # ⇦ nuevo
-    trxs = relationship("Trx", back_populates="entity")                 # ⇦ nuevo
+    clients = relationship("Clients", back_populates="entity")
+    trxs = relationship("Trx", back_populates="entity")
+    cbus = relationship("EntityCBU", back_populates="entity", cascade="all, delete-orphan")
 
+
+class EntityCBU(Base):
+    __tablename__ = "entities_cbus"
+
+    id = Column(Integer, primary_key=True)
+    entity_id = Column(Integer, ForeignKey("entities.id"), nullable=False)
+    cbu_id = Column(Integer, ForeignKey("cbus.id"), nullable=False)
+
+    entity = relationship("Entity", back_populates="cbus")
+    cbu = relationship("CBU")
 
 # Permission Model
 class Permission(Base):
@@ -100,7 +109,7 @@ class CBU(Base):
     alias = Column(String, nullable=False)
     cuit = Column(String, nullable=False)
 
-    entity = relationship("Entity", back_populates="cbu", uselist=False)
+    entities = relationship("EntityCBU", back_populates="cbu", cascade="all, delete-orphan")
 
 
 class Endpoints(Base):

@@ -1,5 +1,5 @@
 from sqlalchemy.orm import Session, joinedload
-from app.models import Trx, Users, CBU, Entity, CustomersBalance
+from app.models import Trx, Users, CBU, Entity, CustomersBalance, EntityCBU
 from sqlalchemy import extract
 from app.schemas.transactions import DocumentRequest, MultipleDocumentRequest, UploadDocumentRequest
 
@@ -76,8 +76,10 @@ class TransactionsService:
     ).first()
     self.error.raise_if_none(trx_exists_model)
 
-    entity_model = self.db.query(Entity).filter(
-      Entity.cbu_id == cbu_model.id
+    entity_model = self.db.query(Entity).join(
+      EntityCBU, Entity.id == EntityCBU.entity_id
+    ).filter(
+        EntityCBU.cbu_id == cbu_model.id
     ).first()
     self.error.raise_if_none(entity_model, f"Entity with cuit: {document_request.receptor_cuit}")
     
@@ -106,12 +108,17 @@ class TransactionsService:
       self.error.raise_if_none(account_model, "Clinet Account")
 
       entity_model = self.db.query(Entity).filter(
-        Entity.cbu_id == self.req_user.get('entity_id')
+        Entity.id == self.req_user.get('entity_id')
       ).first()
-      self.error.raise_if_none(entity_model, "User entity")
-      
+
+      entity_cbu_model = self.db.query(EntityCBU).filter(
+        EntityCBU.entity_id == entity_model.id
+      ).first()
+
+      self.error.raise_if_none(entity_cbu_model, "Entity CBU")
+
       cbu_model = self.db.query(CBU).filter(
-        CBU.id == entity_model.cbu_id
+        CBU.id == entity_cbu_model.cbu_id
       ).first()
 
       # Consultar los trx que ya existen
