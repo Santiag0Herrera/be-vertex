@@ -29,7 +29,7 @@ def run() -> None:
     db = SessionLocal()
     try:
         rows = db.execute(text(SQL)).fetchall()
-        print(datetime.now())
+        print(datetime.datetime.now())
         for row in rows:
             print(row)
         db.commit()
