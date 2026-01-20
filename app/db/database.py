@@ -14,9 +14,6 @@ def create_tables():
   """
   Creates all tables in the database based on the SQLAlchemy models.
   """
-  for key, value in os.environ.items():
-    print(f"{key} = {value}")
-  
   try:
       print("Conecting to database...")
       Base.metadata.create_all(bind=engine)
