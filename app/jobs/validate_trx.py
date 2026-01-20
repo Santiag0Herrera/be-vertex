@@ -1,5 +1,6 @@
 # app/jobs/validate_trx.py
 
+import datetime
 from dotenv import load_dotenv
 from sqlalchemy import text
 load_dotenv()
@@ -28,6 +29,7 @@ def run() -> None:
     db = SessionLocal()
     try:
         rows = db.execute(text(SQL)).fetchall()
+        print(datetime.now())
         for row in rows:
             print(row)
         db.commit()
