@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, Body
 from app.db.database import get_db
 from starlette import status
 from app.services.auth_service import get_current_user
-from app.schemas.users import ChangePasswordRequest, CreateUserRequest, ChangePermissonRequest
+from app.schemas.users import ChangePasswordRequest, CreateUserRequest, ChangePermissonRequest, ChangeUserInfoRequest
 from app.services.DBService import DBService
 
 router = APIRouter(
@@ -54,3 +54,9 @@ async def change_permisson(user: user_dependency, db: db_dependency, change_perm
   db_service = DBService(db=db, req_user=user)
   change_perm_model = db_service.users.change_permission(change_permisson_request)
   return change_perm_model
+
+@router.put("/me", status_code=status.HTTP_200_OK)
+async def change_user_info(user: user_dependency, db: db_dependency, change_user_info_request: ChangeUserInfoRequest):
+  db_service = DBService(db=db, req_user=user)
+  change_user_info_model = db_service.users.change_info(change_user_info_request)
+  return change_user_info_model

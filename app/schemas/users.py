@@ -13,3 +13,8 @@ class CreateUserRequest(BaseModel):
 class ChangePermissonRequest(BaseModel):
   user_id: int
   perm_id: int
+
+class ChangeUserInfoRequest(BaseModel):
+  first_name: str
+  last_name: str
+  phone: str
