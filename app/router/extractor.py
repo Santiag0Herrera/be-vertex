@@ -10,40 +10,192 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 from app.services.auth_service import get_current_user
 from app.schemas.transactions import DocumentRequest
-from pydantic import ValidationError
-
 import re
 import unicodedata
 
 def normalize_key(key: str) -> str:
-    """
-    Strong normalization for OCR / Textract keys.
-    - lowercases
-    - removes accents (áéíóú → aeiou)
-    - removes punctuation (:.-_/)
-    - collapses multiple spaces
-    - trims
-    """
     if not key:
         return ""
-
-    # Lowercase
     k = key.lower()
-
-    # Remove accents (NFD unicode normalization)
     k = unicodedata.normalize("NFD", k)
-    k = "".join(c for c in k if unicodedata.category(c) != "Mn")
+    k = "".join(c for c in k if unicodedata.category(c) != "Mn")  # saca acentos
+    k = re.sub(r"[_\-\/]+", " ", k)          # _, -, / -> espacio
+    k = re.sub(r"[^\w\s]", "", k)            # saca puntuación
+    k = re.sub(r"\s+", " ", k).strip()       # espacios dobles
+    return k
 
-    # Replace separators with spaces
-    k = re.sub(r"[_\-\/]+", " ", k)
+KEY_ALIASES_RAW = {
+    "importe": "amount",
+    "monto": "amount",
+    "monto total": "amount",
+    "numero de transaccion": "trx_id",
+    "nro operacion": "trx_id",
+    "operacion": "trx_id",
+    "referencia": "trx_id",
+    "nombre originante": "emisor_name",
+    "ordenante": "emisor_name",
+    "remitente": "emisor_name",
+    "documento originante": "emisor_cuit",
+    "cuit originante": "emisor_cuit",
+    "dni originante": "emisor_cuit",
+    "cuenta origen": "emisor_cbu",
+    "cbu origen": "emisor_cbu",
+    "cvu origen": "emisor_cbu",
+    "alias origen": "emisor_cbu",
+    "nombre destinatario": "receptor_name",
+    "beneficiario": "receptor_name",
+    "documento destinatario": "receptor_cuit",
+    "cuit destinatario": "receptor_cuit",
+    "dni destinatario": "receptor_cuit",
+    "cuenta destino": "receptor_cbu",
+    "cbu destino": "receptor_cbu",
+    "cvu destino": "receptor_cbu",
+    "alias destino": "receptor_cbu",
+    "fecha y hora": "date",
+    "fecha operacion": "date",
+    "fecha": "date",
+    "importe total": "amount",
+    "valor": "amount",
+    "total": "amount",
+    "id operacion": "trx_id",
+    "id transaccion": "trx_id",
+    "numero operacion": "trx_id",
+    "comprobante": "trx_id",
+    "numero comprobante": "trx_id",
+    "pagador": "emisor_name",
+    "deudor": "emisor_name",
+    "girador": "emisor_name",
+    "acreedor": "emisor_name",
+    "cuil originante": "emisor_cuit",
+    "documento remitente": "emisor_cuit",
+    "cuil remitente": "emisor_cuit",
+    "banco origen": "emisor_cbu",
+    "cuenta origen cbu": "emisor_cbu",
+    "cta origen": "emisor_cbu",
+    "acreedor": "receptor_name",
+    "pagador": "receptor_name",
+    "destinatario final": "receptor_name",
+    "receptor": "receptor_name",
+    "cuil destinatario": "receptor_cuit",
+    "documento beneficiario": "receptor_cuit",
+    "cuil beneficiario": "receptor_cuit",
+    "documento acreedor": "receptor_cuit",
+    "banco destino": "receptor_cbu",
+    "cuenta destino cbu": "receptor_cbu",
+    "cta destino": "receptor_cbu",
+    "cuenta credito": "receptor_cbu",
+    "fecha hora operacion": "date",
+    "fecha hora": "date",
+    "timestamp": "date",
+    "hora operacion": "date",
+    "fecha procesamiento": "date",
+    "fecha transaccion": "date",
+    "fecha movimiento": "date",
+    "fecha efectiva": "date",
+    "fecha liquidacion": "date",
+    "fecha contable": "date",
+    "dinero": "amount",
+    "suma": "amount",
+    "cantidad": "amount",
+    "precio": "amount",
+    "costo": "amount",
+    "gasto": "amount",
+    "deposito": "amount",
+    "extraccion": "amount",
+    "retiro": "amount",
+    "transferencia": "amount",
+    "pago": "amount",
+    "cobro": "amount",
+    "saldo": "amount",
+    "debe": "amount",
+    "haber": "amount",
+    "codigo operacion": "trx_id",
+    "codigo transaccion": "trx_id",
+    "codigo movimiento": "trx_id",
+    "referencia operacion": "trx_id",
+    "referencia transaccion": "trx_id",
+    "numero referencia": "trx_id",
+    "codigo comprobante": "trx_id",
+    "ticket": "trx_id",
+    "recibo": "trx_id",
+    "voucher": "trx_id",
+    "comprobante numero": "trx_id",
+    "referencia numero": "trx_id",
+    "transaccion id": "trx_id",
+    "transaccion numero": "trx_id",
+    "emisor": "emisor_name",
+    "origen": "emisor_name",
+    "remitente nombre": "emisor_name",
+    "nombre remitente": "emisor_name",
+    "cliente origen": "emisor_name",
+    "solicitante": "emisor_name",
+    "oferente": "emisor_name",
+    "cuit emisor": "emisor_cuit",
+    "dni emisor": "emisor_cuit",
+    "cuil emisor": "emisor_cuit",
+    "documento emisor": "emisor_cuit",
+    "numero documento emisor": "emisor_cuit",
+    "numero dni emisor": "emisor_cuit",
+    "numero cuit emisor": "emisor_cuit",
+    "numero cuil emisor": "emisor_cuit",
+    "rut origen": "emisor_cuit",
+    "numero rut origen": "emisor_cuit",
+    "id documento origen": "emisor_cuit",
+    "cbu emisor": "emisor_cbu",
+    "cvu emisor": "emisor_cbu",
+    "alias emisor": "emisor_cbu",
+    "cuenta emisor": "emisor_cbu",
+    "numero cuenta emisor": "emisor_cbu",
+    "banco emisor": "emisor_cbu",
+    "numero banco emisor": "emisor_cbu",
+    "iban origen": "emisor_cbu",
+    "swift origen": "emisor_cbu",
+    "cuenta corriente origen": "emisor_cbu",
+    "caja ahorros origen": "emisor_cbu",
+    "receptor final": "receptor_name",
+    "destino": "receptor_name",
+    "beneficiario nombre": "receptor_name",
+    "nombre beneficiario": "receptor_name",
+    "cliente destino": "receptor_name",
+    "deudor nombre": "receptor_name",
+    "nombre deudor": "receptor_name",
+    "vendedor": "receptor_name",
+    "proveedor": "receptor_name",
+    "cuit receptor": "receptor_cuit",
+    "dni receptor": "receptor_cuit",
+    "cuil receptor": "receptor_cuit",
+    "documento receptor": "receptor_cuit",
+    "numero documento receptor": "receptor_cuit",
+    "numero dni receptor": "receptor_cuit",
+    "numero cuit receptor": "receptor_cuit",
+    "numero cuil receptor": "receptor_cuit",
+    "rut destino": "receptor_cuit",
+    "numero rut destino": "receptor_cuit",
+    "id documento destino": "receptor_cuit",
+    "cbu receptor": "receptor_cbu",
+    "cvu receptor": "receptor_cbu",
+    "alias receptor": "receptor_cbu",
+    "cuenta receptor": "receptor_cbu",
+    "numero cuenta receptor": "receptor_cbu",
+    "banco receptor": "receptor_cbu",
+    "numero banco receptor": "receptor_cbu",
+    "iban destino": "receptor_cbu",
+    "swift destino": "receptor_cbu",
+    "cuenta corriente destino": "receptor_cbu",
+    "caja ahorros destino": "receptor_cbu",
+    "numero de operacion de mercado pago": "trx_id",  # ok quedate con trx_id
+    # --- Mercado Pago / billeteras ---
+    "cvu": "wallet_cvu",
+    "cuit cuil": "wallet_cuit",
+    "cuitcuil": "wallet_cuit",
+    "cuit": "wallet_cuit",
+    "cuil": "wallet_cuit",
+    "dni": "wallet_cuit",
+    "documento": "wallet_cuit",
+    }
 
-    # Remove punctuation
-    k = re.sub(r"[^\w\s]", "", k)
+KEY_ALIASES = {normalize_key(k): v for k, v in KEY_ALIASES_RAW.items()}
 
-    # Collapse multiple spaces
-    k = re.sub(r"\s+", " ", k)
-
-    return k.strip()
 
 class ParseIssue(BaseModel):
     field: str
@@ -55,7 +207,7 @@ class DocumentExtractResponse(BaseModel):
     partial: Dict[str, Any] = Field(default_factory=dict)  # lo que haya salido
     missing: List[str] = Field(default_factory=list)
     errors: List[ParseIssue] = Field(default_factory=list)
-    raw_fields: List[ExtractedField] = Field(default_factory=list)  # opcional, por si querés debug
+    raw_fields: List["ExtractedField"] = Field(default_factory=list)
 
 user_dependency = Annotated[dict, Depends(get_current_user)]
 
@@ -225,6 +377,15 @@ def build_document_response(fields: List[ExtractedField]) -> DocumentExtractResp
     missing: List[str] = []
     errors: List[ParseIssue] = []
     raw_amount = normalized.get("amount")
+    wallet_cvu = normalized.get("wallet_cvu")
+    if wallet_cvu:
+        digits = extract_digits(wallet_cvu)
+        # CVU suele ser 22
+        partial["wallet_cvu"] = digits if len(digits) in (22,) else digits
+
+    wallet_cuit = normalized.get("wallet_cuit")
+    if wallet_cuit:
+        partial["wallet_cuit"] = extract_digits(wallet_cuit)
     if raw_amount:
         try:
             partial["amount"] = parse_amount(raw_amount)
@@ -272,18 +433,16 @@ def build_document_response(fields: List[ExtractedField]) -> DocumentExtractResp
             errors.append(ParseIssue(field="date", message=f"Invalid date '{raw_date}': {e}"))
     else:
         missing.append("date")
-    try:
-        doc = DocumentRequest(**partial)
-        return DocumentExtractResponse(
-            ok=True,
-            document=doc,
-            partial=partial,
-            missing=missing,
-            errors=errors,
-            raw_fields=fields,
-        )
-    except ValidationError as e:
-        errors.append(ParseIssue(field="document", message=str(e)))
+    wallet = is_wallet_document(fields)
+    if wallet:
+      missing = [m for m in missing if m not in {
+          "emisor_name",
+          "receptor_name",
+          "receptor_cuit",
+      }]
+    REQUIRED_FOR_DOCUMENT = {"amount","trx_id","emisor_name","emisor_cuit","receptor_name","receptor_cuit","date"}
+    has_all_required = REQUIRED_FOR_DOCUMENT.issubset(partial.keys())
+    if not has_all_required:
         return DocumentExtractResponse(
             ok=False,
             document=None,
@@ -292,7 +451,25 @@ def build_document_response(fields: List[ExtractedField]) -> DocumentExtractResp
             errors=errors,
             raw_fields=fields,
         )
-    
+    # recién acá validás
+    doc_payload = {k: v for k, v in partial.items() if k in DocumentRequest.model_fields}
+    doc = DocumentRequest(**doc_payload)
+    return DocumentExtractResponse(ok=True, document=doc, partial=partial, missing=missing, errors=errors, raw_fields=fields)
+        
+
+def is_wallet_document(fields: List[ExtractedField]) -> bool:
+    key_text = " ".join(normalize_key(f.key) for f in fields)
+    value_text = " ".join(normalize_key(str(f.value)) for f in fields if f.value)
+    if "mercado pago" in key_text or "mercado pago" in value_text:
+        return True
+    if "numero de operacion de mercado pago" in key_text:
+        return True
+    wallet_words = {"cvu", "cuit cuil", "cuitcuil"}
+    has_wallet_terms = any(w in key_text for w in wallet_words)
+    banking_words = {"cbu", "transferencia", "comprobante", "cbu origen", "cbu destino"}
+    looks_bank = any(w in key_text for w in banking_words)
+    return has_wallet_terms and not looks_bank
+
 
 router = APIRouter(prefix="/extractor", tags=["textract"])
 @router.post("/aws-extract", response_model=DocumentExtractResponse)
@@ -361,13 +538,6 @@ async def analyze_document(
     return build_document_response(fields)
 
 
-def normalize_key(key: str) -> str:
-    return (
-        key.lower()
-        .replace(":", "")
-        .strip()
-    )
-
 def parse_amount(raw: str) -> float:
     raw = raw.replace("$", "").replace(".", "").replace(",", ".")
     return float(raw.strip())
@@ -407,165 +577,3 @@ def build_document_request(fields: List[ExtractedField]) -> DocumentRequest:
         )
     except KeyError as e:
         raise ValueError(f"Missing required field from Textract: {e}")
-    
-
-KEY_ALIASES = {
-    "importe": "amount",
-    "monto": "amount",
-    "monto total": "amount",
-    "numero de transaccion": "trx_id",
-    "nro operacion": "trx_id",
-    "operacion": "trx_id",
-    "referencia": "trx_id",
-    "nombre originante": "emisor_name",
-    "ordenante": "emisor_name",
-    "remitente": "emisor_name",
-    "documento originante": "emisor_cuit",
-    "cuit originante": "emisor_cuit",
-    "dni originante": "emisor_cuit",
-    "cuenta origen": "emisor_cbu",
-    "cbu origen": "emisor_cbu",
-    "cvu origen": "emisor_cbu",
-    "alias origen": "emisor_cbu",
-    "nombre destinatario": "receptor_name",
-    "beneficiario": "receptor_name",
-    "documento destinatario": "receptor_cuit",
-    "cuit destinatario": "receptor_cuit",
-    "dni destinatario": "receptor_cuit",
-    "cuenta destino": "receptor_cbu",
-    "cbu destino": "receptor_cbu",
-    "cvu destino": "receptor_cbu",
-    "alias destino": "receptor_cbu",
-    "fecha y hora": "date",
-    "fecha operacion": "date",
-    "fecha": "date",
-    "importe total": "amount",
-    "valor": "amount",
-    "total": "amount",
-    "id operacion": "trx_id",
-    "id transaccion": "trx_id",
-    "numero operacion": "trx_id",
-    "comprobante": "trx_id",
-    "numero comprobante": "trx_id",
-    "pagador": "emisor_name",
-    "deudor": "emisor_name",
-    "girador": "emisor_name",
-    "acreedor": "emisor_name",
-    "cuil originante": "emisor_cuit",
-    "documento remitente": "emisor_cuit",
-    "cuil remitente": "emisor_cuit",
-    "banco origen": "emisor_cbu",
-    "cuenta origen cbu": "emisor_cbu",
-    "cta origen": "emisor_cbu",
-    "acreedor": "receptor_name",
-    "pagador": "receptor_name",
-    "destinatario final": "receptor_name",
-    "receptor": "receptor_name",
-    "cuil destinatario": "receptor_cuit",
-    "documento beneficiario": "receptor_cuit",
-    "cuil beneficiario": "receptor_cuit",
-    "documento acreedor": "receptor_cuit",
-    "banco destino": "receptor_cbu",
-    "cuenta destino cbu": "receptor_cbu",
-    "cta destino": "receptor_cbu",
-    "cuenta credito": "receptor_cbu",
-    "fecha hora operacion": "date",
-    "fecha hora": "date",
-    "timestamp": "date",
-    "hora operacion": "date",
-    "fecha procesamiento": "date",
-    "fecha transaccion": "date",
-    "fecha movimiento": "date",
-    "fecha efectiva": "date",
-    "fecha liquidacion": "date",
-    "fecha contable": "date",
-    "dinero": "amount",
-    "suma": "amount",
-    "cantidad": "amount",
-    "precio": "amount",
-    "costo": "amount",
-    "gasto": "amount",
-    "deposito": "amount",
-    "extraccion": "amount",
-    "retiro": "amount",
-    "transferencia": "amount",
-    "pago": "amount",
-    "cobro": "amount",
-    "saldo": "amount",
-    "debe": "amount",
-    "haber": "amount",
-    "codigo operacion": "trx_id",
-    "codigo transaccion": "trx_id",
-    "codigo movimiento": "trx_id",
-    "referencia operacion": "trx_id",
-    "referencia transaccion": "trx_id",
-    "numero referencia": "trx_id",
-    "codigo comprobante": "trx_id",
-    "ticket": "trx_id",
-    "recibo": "trx_id",
-    "voucher": "trx_id",
-    "comprobante numero": "trx_id",
-    "referencia numero": "trx_id",
-    "transaccion id": "trx_id",
-    "transaccion numero": "trx_id",
-    "emisor": "emisor_name",
-    "origen": "emisor_name",
-    "remitente nombre": "emisor_name",
-    "nombre remitente": "emisor_name",
-    "cliente origen": "emisor_name",
-    "solicitante": "emisor_name",
-    "oferente": "emisor_name",
-    "cuit emisor": "emisor_cuit",
-    "dni emisor": "emisor_cuit",
-    "cuil emisor": "emisor_cuit",
-    "documento emisor": "emisor_cuit",
-    "numero documento emisor": "emisor_cuit",
-    "numero dni emisor": "emisor_cuit",
-    "numero cuit emisor": "emisor_cuit",
-    "numero cuil emisor": "emisor_cuit",
-    "rut origen": "emisor_cuit",
-    "numero rut origen": "emisor_cuit",
-    "id documento origen": "emisor_cuit",
-    "cbu emisor": "emisor_cbu",
-    "cvu emisor": "emisor_cbu",
-    "alias emisor": "emisor_cbu",
-    "cuenta emisor": "emisor_cbu",
-    "numero cuenta emisor": "emisor_cbu",
-    "banco emisor": "emisor_cbu",
-    "numero banco emisor": "emisor_cbu",
-    "iban origen": "emisor_cbu",
-    "swift origen": "emisor_cbu",
-    "cuenta corriente origen": "emisor_cbu",
-    "caja ahorros origen": "emisor_cbu",
-    "receptor final": "receptor_name",
-    "destino": "receptor_name",
-    "beneficiario nombre": "receptor_name",
-    "nombre beneficiario": "receptor_name",
-    "cliente destino": "receptor_name",
-    "deudor nombre": "receptor_name",
-    "nombre deudor": "receptor_name",
-    "vendedor": "receptor_name",
-    "proveedor": "receptor_name",
-    "cuit receptor": "receptor_cuit",
-    "dni receptor": "receptor_cuit",
-    "cuil receptor": "receptor_cuit",
-    "documento receptor": "receptor_cuit",
-    "numero documento receptor": "receptor_cuit",
-    "numero dni receptor": "receptor_cuit",
-    "numero cuit receptor": "receptor_cuit",
-    "numero cuil receptor": "receptor_cuit",
-    "rut destino": "receptor_cuit",
-    "numero rut destino": "receptor_cuit",
-    "id documento destino": "receptor_cuit",
-    "cbu receptor": "receptor_cbu",
-    "cvu receptor": "receptor_cbu",
-    "alias receptor": "receptor_cbu",
-    "cuenta receptor": "receptor_cbu",
-    "numero cuenta receptor": "receptor_cbu",
-    "banco receptor": "receptor_cbu",
-    "numero banco receptor": "receptor_cbu",
-    "iban destino": "receptor_cbu",
-    "swift destino": "receptor_cbu",
-    "cuenta corriente destino": "receptor_cbu",
-    "caja ahorros destino": "receptor_cbu",
-    }
