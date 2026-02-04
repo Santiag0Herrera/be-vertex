@@ -124,7 +124,6 @@ class UserService():
   
 
   def change_info(self, change_user_info_request: ChangeUserInfoRequest):
-    print(self.req_user.get("id"))
     user_model = self.db.query(Users).filter(
       Users.id == self.req_user.get('id')
     ).first()

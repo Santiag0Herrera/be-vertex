@@ -42,4 +42,4 @@ class ErrorService:
       Evaluates if a value is None and raises a 404 http exception
     """
     if value is None:
-        ErrorService._raise_not_found(entity)
+        ErrorService.raise_not_found(entity)

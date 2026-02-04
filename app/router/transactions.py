@@ -52,10 +52,15 @@ async def get_movements_from_interbanking(user: user_dependency, movements_reque
   ib_service = InterBankingService()
   movements_model = await ib_service.get_movement(
     movements_request.account_number, 
-    movements_request.bank_number, 
-    movements_request.customer_id
+    movements_request.bank_number
   )
   # 015
   # C66408A
   # 09170210248397
   return movements_model
+
+@router.get("/get_owner_accounts", status_code=status.HTTP_200_OK)
+async def get_balances_from_interbanking(user: user_dependency):
+  ib_service = InterBankingService()
+  balances_model = await ib_service.get_accounts_balances()
+  return balances_model

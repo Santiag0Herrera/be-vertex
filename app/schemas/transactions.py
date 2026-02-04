@@ -28,4 +28,3 @@ class UploadDocumentRequest(BaseModel):
 class MovementsRequest(BaseModel):
   account_number: str
   bank_number: str
-  customer_id: str
