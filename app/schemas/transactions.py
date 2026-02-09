@@ -28,3 +28,5 @@ class UploadDocumentRequest(BaseModel):
 class MovementsRequest(BaseModel):
   account_number: str
   bank_number: str
+  date_since: Optional[str]
+  date_until: Optional[str]

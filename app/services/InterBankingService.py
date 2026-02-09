@@ -14,6 +14,7 @@ class InterBankingService:
     self.ib_auth_url = os.getenv("MS_INTER_BANKING_AUTH_URL")
     self.ib_api_url = os.getenv("MS_INTER_BANKING_API_URL")
     self.ib_balances_api_url = os.getenv("MS_INTER_BANKING_API_BALANCES")
+    self.ib_accounts_api_url = os.getenv("MS_INTER_BANKING_API_ACCOUNTS")
     self.client_id = os.getenv("MS_INTER_BANKING_CLIENT_ID")
     self.client_secret = os.getenv("MS_INTER_BANKING_CLIENT_SECRET")
     self.customer_id = os.getenv("MS_INTER_BANKING_CUSTOMER_ID")
@@ -26,7 +27,7 @@ class InterBankingService:
   
   @staticmethod
   def _is_token_expired(token: str) -> bool:
-      if not token or token.count(".") != 2:
+      if not token:
           return True
       try:
           decoded = jwt.decode(token, options={"verify_signature": False})
@@ -62,13 +63,16 @@ class InterBankingService:
     return result
   
 
-  async def get_movement(self, account_number, bank_number):
+  async def get_movement(self, account_number, bank_number, date_since, date_until):
     """
     Obtains movements
     """
-    self._update_token()
-
-    url = f"{self.ib_api_url}{account_number}/movements/anteriores?bank-number={bank_number}&customer-id={self.customer_id}&page=50"
+    await self._update_token()
+    url = f"{self.ib_api_url}{account_number}/movements/anteriores?bank-number={bank_number}&customer-id={self.customer_id}"
+    if date_since:
+       url += f"&date-since={date_since}"
+    if date_until:
+       url += f"&date-until={date_until}"
     payload = {}
     headers = {
       'Accept': 'application/json',
@@ -77,7 +81,7 @@ class InterBankingService:
     }
     response = requests.request("GET", url, headers=headers, data=payload)
     result = response.json()
-    return self.success.response(result)
+    return result
 
 
   async def get_accounts_balances(self):
@@ -98,6 +102,7 @@ class InterBankingService:
     parsed_accounts = []
     for b in accounts_list: 
       parsed_result = {
+          **b,
           "historial": b.get("historical_balances"),
           "bank_name": codes[b.get("bank_number")],
           "account_type": b.get("account_type"),
@@ -109,4 +114,15 @@ class InterBankingService:
     return self.success.response(parsed_accounts)
      
       
-  
+  async def get_accounts(self):
+    await self._update_token()
+    url = f"{self.ib_accounts_api_url}?customer-id={self.customer_id}"
+    payload = {}
+    headers = {
+      'Accept': 'application/json',
+      'Authorization': f"Bearer {self.token.get('access_token')}",
+      'client_id': self.client_id
+    }
+    repsonse = requests.request("GET", url=url, headers=headers, data=payload)
+    result = repsonse.json()
+    return result
