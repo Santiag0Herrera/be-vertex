@@ -90,7 +90,7 @@ class Trx(Base):
     entity_id = Column(Integer, ForeignKey("entities.id"))
     client_id = Column(Integer, ForeignKey("clients.id"))
     amount = Column(Float, nullable=False)
-    date = Column(String, nullable=False)
+    date = Column(DateTime, nullable=False)
     status = Column(String, nullable=False)
     account_id = Column(Integer, ForeignKey("customers_balance.id"), nullable=False)
 
