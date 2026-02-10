@@ -117,9 +117,9 @@ async def run() -> None:
               # POR CADA MOVIMIENTO ENCONTRADO EN EL RANGO DE FECHA, PARA ESA CUENTA, NOS FIJAMOS SI EXISTE ALGUN MATCH
               is_match = match_trx_with_ib(trx, ib_movements_result["movements_detail"])
               if is_match:
-                  update_trx_status(trx_id=trx_id, new_status="consolidado")
+                  update_trx_status(trx_id=trx_id, new_status="conciliado")
                   print("    |")
-                  print(f"    |_ Trx {trx_id} pendiente --> consolidada")
+                  print(f"    |_ Trx {trx_id} pendiente --> conciliado")
                   updated_trx_count += 1
               else:
                   print("    |")
@@ -130,7 +130,7 @@ async def run() -> None:
         print(f"    |_ No existen trx pendientes para la cuenta {acc.get('account_number')} del banco {acc.get('bank_name')}")
       print("")
       
-    print(f"Se consolidaron {updated_trx_count} de {len(pending_transactions)} transacciones pendientes")
+    print(f"Se conciliaron {updated_trx_count} de {len(pending_transactions)} transacciones pendientes")
     print("========================================================================================================================")
     print("")
 
