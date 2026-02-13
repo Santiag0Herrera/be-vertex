@@ -42,7 +42,7 @@ class PermissionMiddleware(BaseHTTPMiddleware):
             except JWTError as e:
                 logging.error(f"❌ JWT decoding error: {e}")
                 _save_log(path, method, user="invalid-token")
-                return JSONResponse(status_code=HTTP_401_UNAUTHORIZED, content={"detail": "Invalid token"})
+                return JSONResponse(status_code=HTTP_403_FORBIDDEN, content={"detail": "Invalid token"})
 
             perm_id = payload.get("perm_id")
             user_hierarchy = payload.get("hierarchy")

@@ -23,8 +23,19 @@ class UserService():
       ).all()
 
       self.error.raise_if_none(users_model)
+      users_response = []
+      for user in users_model:
+        users_response.append({
+            "perm_id": user.perm_id,
+            "entity_id": user.entity_id,
+            "id": user.id,
+            "first_name": user.first_name,
+            "last_name": user.last_name,
+            "email": user.email,
+            "phone": user.phone
+        })
       
-      return self.success.response(users_model)
+      return self.success.response(users_response)
   
   
   def get_current(self):
