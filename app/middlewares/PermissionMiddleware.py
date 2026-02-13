@@ -68,7 +68,7 @@ class PermissionMiddleware(BaseHTTPMiddleware):
             if not has_access:
                 logging.warning(f"⛔ Access denied for perm_id={perm_id} to path={path}")
                 _save_log(path, method, user=f"{user_email} (denied)")
-                return JSONResponse(status_code=HTTP_403_FORBIDDEN, content={"detail": "Permission denied"})
+                return JSONResponse(status_code=HTTP_401_UNAUTHORIZED, content={"detail": "Permission denied"})
 
             # Request autorizada: llamamos la ruta y logeamos con status
             response = await call_next(request)

@@ -26,6 +26,7 @@ class UserService():
       
       return self.success.response(users_model)
   
+  
   def get_current(self):
     """
     Gets the requesting user's info.
@@ -49,6 +50,7 @@ class UserService():
       }
     })
   
+
   def change_password(self, change_password_request: ChangePasswordRequest):
     """
     Changes requesting user's password
@@ -65,6 +67,7 @@ class UserService():
     self.db.commit()
     return self.success.response('Password changed successfully!')
   
+
   def create(self, create_user_request: CreateUserRequest):
     """
     Creates a new user in the requesting user's entity.
@@ -79,7 +82,6 @@ class UserService():
     # Buscamos el id del permiso para usuarios
     users_permission_model = self.db.query(Permission).filter(Permission.level == 'users').first()
 
-
     create_user_model = Users(
       first_name=create_user_request.first_name,
       last_name=create_user_request.last_name,
@@ -93,6 +95,7 @@ class UserService():
     self.db.commit()
     return self.success.response({'message': 'Usuario creado con exito!', 'generated_password': auto_generated_password})
   
+
   def delete(self, user_id: int):
     if self.req_user.get("id") == user_id:
       self.error.raise_conflict("You can not delete your own user account.")
@@ -112,6 +115,7 @@ class UserService():
     self.db.commit()
     return self.success.response(f"Usuario {user_model.first_name} {user_model.last_name} fue eliminado exitosamente.")
   
+
   def change_permission(self, change_permisson_request: ChangePermissonRequest):
     if self.req_user.get("id") == change_permisson_request.user_id:
       self.error.raise_bad_request("User can not change his own permission.")
@@ -128,6 +132,7 @@ class UserService():
     self.db.add(user_model)
     self.db.commit()
     return self.success.response("Permisson changed successfully!")
+
 
   def change_info(self, change_user_info_request: ChangeUserInfoRequest):
     user_model = self.db.query(Users).filter(
