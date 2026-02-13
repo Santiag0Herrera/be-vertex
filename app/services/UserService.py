@@ -1,4 +1,5 @@
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 from app.models import Users
 from app.schemas.users import ChangePasswordRequest, CreateUserRequest, ChangePermissonRequest, ChangeUserInfoRequest
 from app.services.auth_service import bcrypt_context
@@ -55,7 +56,7 @@ class UserService():
     """
     user_model = self.db.query(Users).filter(
       Users.id == self.req_user.get('id')
-    ).first()
+    ).first() # func.lower(Users.email) → genera LOWER(email) en la query SQL.
 
     if not bcrypt_context.verify(change_password_request.password, user_model.hashed_password):
       self.error.raise_unauthorized('Incorrect password')
@@ -69,7 +70,7 @@ class UserService():
     """
     Creates a new user in the requesting user's entity.
     """
-    user_exists_model = self.db.query(Users).filter(Users.email.lower() == create_user_request.email).first()
+    user_exists_model = self.db.query(Users).filter(func.lower(Users.email) == create_user_request.email.lower()).first()
   
     if user_exists_model:
       self.error.raise_conflict(f"Usuario {create_user_request.email} ya existe.")
@@ -121,7 +122,6 @@ class UserService():
     self.db.add(user_model)
     self.db.commit()
     return self.success.response("Permisson changed successfully!")
-  
 
   def change_info(self, change_user_info_request: ChangeUserInfoRequest):
     user_model = self.db.query(Users).filter(
