@@ -1,6 +1,6 @@
 from sqlalchemy.orm import Session
 from sqlalchemy import func
-from app.models import Users
+from app.models import Users, Permission
 from app.schemas.users import ChangePasswordRequest, CreateUserRequest, ChangePermissonRequest, ChangeUserInfoRequest
 from app.services.auth_service import bcrypt_context
 
@@ -19,8 +19,7 @@ class UserService():
       Gets all users from them same requesting users's entity.
       """
       users_model = self.db.query(Users).filter(
-        Users.entity_id == self.req_user.get('entity_id'),
-        Users.perm_id != 3
+        Users.entity_id == self.req_user.get('entity_id')
       ).all()
 
       self.error.raise_if_none(users_model)
@@ -77,13 +76,17 @@ class UserService():
     
     auto_generated_password = (create_user_request.first_name[:2] + create_user_request.last_name + "123").lower()
 
+    # Buscamos el id del permiso para usuarios
+    users_permission_model = self.db.query(Permission).filter(Permission.level == 'users').first()
+
+
     create_user_model = Users(
       first_name=create_user_request.first_name,
       last_name=create_user_request.last_name,
       email=create_user_request.email.lower(),
       hashed_password=bcrypt_context.hash(auto_generated_password),
       phone=create_user_request.phone,
-      perm_id=3,
+      perm_id=users_permission_model.id,
       entity_id=self.req_user.get('entity_id')
     )
     self.db.add(create_user_model)
@@ -99,7 +102,10 @@ class UserService():
     if user_model is None:
       self.error.raise_bad_request(f"User N°: {user_id} does not exist.")
     
-    if user_model.perm_id == 3:
+    # Buscamos el id del permiso para clientes
+    clients_permission_model = self.db.query(Permission).filter(Permission.level == 'client').first()
+
+    if user_model.perm_id == clients_permission_model.id:
       self.error.raise_bad_request("The account is a client type.")
     
     self.db.delete(user_model)

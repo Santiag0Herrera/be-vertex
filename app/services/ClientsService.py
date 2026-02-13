@@ -1,6 +1,6 @@
 from typing import List
 from sqlalchemy import select
-from app.models import Clients, Users
+from app.models import Clients, Users, Permission
 from sqlalchemy.orm import Session
 from .ErrorService import ErrorService
 from .SuccessService import SuccessService
@@ -47,16 +47,35 @@ class ClientService():
     
     auto_generated_password = (new_client_request.first_name[:2] + new_client_request.last_name + "123").lower()
 
+    # Buscamos el id del permiso para clientes
+    clients_permission_model = self.db.query(Permission).filter(Permission.level == 'client').first()
+
     create_client_model = Clients(
       first_name=new_client_request.first_name,
       last_name=new_client_request.last_name,
       email=new_client_request.email.strip().lower(),
       hashed_password=bcrypt_context.hash(auto_generated_password),
       phone=new_client_request.phone,
-      perm_id=2,
+      perm_id=clients_permission_model.id,
       entity_id=self.req_user.get('entity_id')
     )
 
     self.db.add(create_client_model)
     self.db.commit()
     return self.success.response({'message': 'Cliente creado con exito!', 'generated_password': auto_generated_password})
+  
+  def delete(self, id_client: int):
+    """
+    Deletes client by client_id
+    """
+    client_model = self.db.query(Clients).filter(Clients.id == id_client).first()
+
+    if client_model is None:
+      self.error.raise_not_found("Cliente")
+    
+    self.db.delete(client_model)
+    self.db.commit()
+    return self.success.response(f"Cliente {client_model.first_name} {client_model.last_name} fue eliminado exitosamente.")
+    
+
+    
