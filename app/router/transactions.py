@@ -4,9 +4,10 @@ from fastapi import APIRouter, Depends, Query
 from app.db.database import get_db
 from starlette import status
 from app.services.auth_service import get_current_user
-from app.schemas.transactions import DocumentRequest, MultipleDocumentRequest, UploadDocumentRequest, MovementsRequest
+from app.schemas.transactions import DocumentRequest, MultipleDocumentRequest, UploadDocumentRequest, MovementsRequest, AllMovementsRequest
 from app.services.DBService import DBService
 from app.services.InterBankingService import InterBankingService
+from typing import Optional
 
 router = APIRouter(
   prefix='/trx',
@@ -65,3 +66,10 @@ async def get_balances_from_interbanking(user: user_dependency):
   ib_service = InterBankingService()
   balances_model = await ib_service.get_accounts_balances()
   return balances_model
+
+
+@router.get("/get_all_movements", status_code=status.HTTP_200_OK)
+async def get_all_movements(user: user_dependency, date_since: Optional[str], date_until: Optional[str]):
+  ib_service = InterBankingService()
+  movements_model = await ib_service.get_movements_for_all_accounts(date_since=date_since, date_until=date_until)
+  return movements_model

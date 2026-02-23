@@ -5,6 +5,8 @@ import requests
 import datetime
 import jwt
 from app.bank_codes import codes
+from typing import Optional
+
 
 class InterBankingService:
   def __init__(self):
@@ -82,6 +84,27 @@ class InterBankingService:
     response = requests.request("GET", url, headers=headers, data=payload)
     result = response.json()
     return result
+
+
+  async def get_movements_for_all_accounts(self, date_since: Optional[str], date_until: Optional[str]):
+    """
+    Obtains all movments for all the ib client account
+    """
+    accounts_model = await self.get_accounts()
+    accounts = accounts_model.get("accounts")
+    accounts_with_movments = []
+    for ac in accounts :
+      account_number = ac.get("account_number")
+      bank_number = ac.get("bank_number")
+      account_movements = await self.get_movement(
+        account_number=account_number,
+        bank_number=bank_number,
+        date_since=date_since,
+        date_until=date_until
+      )
+      accounts_with_movments.append({ **ac, "movements": account_movements.get("movements_detail") })
+    
+    return accounts_with_movments
 
 
   async def get_accounts_balances(self):

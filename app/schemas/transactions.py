@@ -30,3 +30,8 @@ class MovementsRequest(BaseModel):
   bank_number: str
   date_since: Optional[str]
   date_until: Optional[str]
+
+
+class AllMovementsRequest:
+  date_since: Optional[str]
+  date_until: Optional[str]
