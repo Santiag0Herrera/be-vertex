@@ -69,6 +69,7 @@ class CustomerBalanceService:
     trxs = (
       self.db.query(Trx)
       .filter(Trx.account_id == balance_model.id)
+      .filter(Trx.status == "conciliado")
       .all()
     )
 

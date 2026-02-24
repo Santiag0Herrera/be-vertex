@@ -6,7 +6,7 @@ from sqlalchemy import text
 from app.db.database import SessionLocal
 from app.services.InterBankingService import InterBankingService
 from app.bank_codes import codes
-from app.models import Trx
+from app.models import CustomersBalance
 
 load_dotenv()
 SQL = """
@@ -64,22 +64,30 @@ def match_trx_with_ib(trx, ib_movements):
             return mov  # HUBO MATCH
     return None  # NO HUBO MATCH
 
-def update_trx_status(trx_id: str, new_status: str):
+def update_trx_status(trx_id: str, new_status: str, trx_customer_balance_id: int, trx_amount: int):
     db = SessionLocal()
     try:
         db.execute(
             text("UPDATE trx SET status = :status WHERE trx_id = :trx_id"),
             {"status": new_status, "trx_id": trx_id}
         )
+        db.execute(
+            text("""
+                UPDATE customers_balance
+                SET balance_amount = balance_amount + :amount
+                WHERE id = :id
+            """),
+            {"amount": trx_amount, "id": trx_customer_balance_id}
+        )
         db.commit()
-    except Exception as e:
+    except Exception:
         db.rollback()
+        raise
     finally:
         db.close()
 
 async def run() -> None:
     ib_service = InterBankingService()
-    db = SessionLocal()
     accounts_model = await ib_service.get_accounts()
     # BUSCAMOS TODAS LAS CUENTAS DEL CLIENTE
     accounts = accounts_model.get('accounts')
@@ -106,6 +114,8 @@ async def run() -> None:
               # BUSCAMOS LA TRX PENDIENTE DE VALIDAR
               date = trx.get("trx_date").date()
               trx_id = trx.get("trx_id")
+              trx_customer_balance_id = trx.get("customer_balance_id")
+              trx_amount = trx.get("trx_amount")
               trx_date_since = (date - datetime.timedelta(days=1)).isoformat()
               trx_date_until = (date + datetime.timedelta(days=1)).isoformat()
               ib_movements_result = await ib_service.get_movement(
@@ -117,7 +127,7 @@ async def run() -> None:
               # POR CADA MOVIMIENTO ENCONTRADO EN EL RANGO DE FECHA, PARA ESA CUENTA, NOS FIJAMOS SI EXISTE ALGUN MATCH
               is_match = match_trx_with_ib(trx, ib_movements_result["movements_detail"])
               if is_match:
-                  update_trx_status(trx_id=trx_id, new_status="conciliado")
+                  update_trx_status(trx_id=trx_id, new_status="conciliado", trx_customer_balance_id=trx_customer_balance_id, trx_amount=trx_amount)
                   print("    |")
                   print(f"    |_ Trx {trx_id} pendiente --> conciliado")
                   updated_trx_count += 1
