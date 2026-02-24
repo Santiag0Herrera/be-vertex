@@ -1,18 +1,24 @@
 from __future__ import annotations
+
 from datetime import date, datetime
 import os
 import re
+import unicodedata
 from typing import Annotated, Any, Dict, List, Optional
+
 import boto3
 from botocore.config import Config
 from botocore.exceptions import BotoCoreError, ClientError
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from pydantic import BaseModel, Field
+
 from app.services.auth_service import get_current_user
 from app.schemas.transactions import DocumentRequest
-import re
-import unicodedata
 
+
+# ---------------------------
+# Normalización de keys
+# ---------------------------
 def normalize_key(key: str) -> str:
     if not key:
         return ""
@@ -24,6 +30,10 @@ def normalize_key(key: str) -> str:
     k = re.sub(r"\s+", " ", k).strip()       # espacios dobles
     return k
 
+
+# ---------------------------
+# Aliases
+# ---------------------------
 KEY_ALIASES_RAW = {
     "importe": "amount",
     "monto": "amount",
@@ -183,7 +193,8 @@ KEY_ALIASES_RAW = {
     "swift destino": "receptor_cbu",
     "cuenta corriente destino": "receptor_cbu",
     "caja ahorros destino": "receptor_cbu",
-    "numero de operacion de mercado pago": "trx_id",  # ok quedate con trx_id
+    "numero de operacion de mercado pago": "trx_id",
+
     # --- Mercado Pago / billeteras ---
     "cvu": "wallet_cvu",
     "cuit cuil": "wallet_cuit",
@@ -192,25 +203,40 @@ KEY_ALIASES_RAW = {
     "cuil": "wallet_cuit",
     "dni": "wallet_cuit",
     "documento": "wallet_cuit",
-    }
+}
 
 KEY_ALIASES = {normalize_key(k): v for k, v in KEY_ALIASES_RAW.items()}
+
+
+# ---------------------------
+# Models de respuesta
+# ---------------------------
+class ExtractedField(BaseModel):
+    key: str
+    value: str
+    confidence: Optional[float] = None
 
 
 class ParseIssue(BaseModel):
     field: str
     message: str
 
+
 class DocumentExtractResponse(BaseModel):
     ok: bool
-    document: Optional[DocumentRequest] = None   # cuando valida completo
-    partial: Dict[str, Any] = Field(default_factory=dict)  # lo que haya salido
+    document: Optional[DocumentRequest] = None
+    partial: Dict[str, Any] = Field(default_factory=dict)
     missing: List[str] = Field(default_factory=list)
     errors: List[ParseIssue] = Field(default_factory=list)
-    raw_fields: List["ExtractedField"] = Field(default_factory=list)
+    raw_fields: List[ExtractedField] = Field(default_factory=list)
+
 
 user_dependency = Annotated[dict, Depends(get_current_user)]
 
+
+# ---------------------------
+# AWS Textract client
+# ---------------------------
 AWS_REGION = os.getenv("AWS_REGION", "us-east-1")
 _textract = boto3.client(
     "textract",
@@ -222,28 +248,117 @@ _textract = boto3.client(
     ),
 )
 
-class ExtractedField(BaseModel):
-    key: str
-    value: str
-    confidence: Optional[float] = None
+
+# ---------------------------
+# Helpers de parsing de texto
+# ---------------------------
+def extract_digits(raw: str) -> str:
+    return re.sub(r"\D", "", str(raw or ""))
 
 
-class TextractParsedResponse(BaseModel):
-    # Campos sueltos (KV) normalizados
-    fields: List[ExtractedField] = Field(default_factory=list)
+def extract_cbu(raw: str) -> Optional[str]:
+    digits = extract_digits(raw)
+    return digits if len(digits) == 22 else None
 
-    # Para debug / trazabilidad
-    document_pages: Optional[int] = None
-    raw_request_id: Optional[str] = None
 
+def parse_amount(raw: str) -> float:
+    """
+    Soporta cosas tipo:
+    - "$ 1.234,56"
+    - "1.234,56"
+    - "1234.56"
+    - "1,234.56" (a veces viene así)
+    """
+    s = str(raw or "").strip()
+    if not s:
+        raise ValueError("empty amount")
+
+    s = s.replace("$", "").replace("ARS", "").replace("AR$", "").strip()
+    s = re.sub(r"\s+", "", s)
+
+    # Si tiene coma y punto, decidimos qué es decimal por la última aparición
+    if "," in s and "." in s:
+        if s.rfind(",") > s.rfind("."):
+            # "1.234,56" => "." miles, "," decimal
+            s = s.replace(".", "").replace(",", ".")
+        else:
+            # "1,234.56" => "," miles, "." decimal
+            s = s.replace(",", "")
+    else:
+        # Si solo tiene coma, la tratamos como decimal
+        if "," in s:
+            s = s.replace(".", "").replace(",", ".")
+        # Si solo tiene punto, lo dejamos como decimal (y removemos separadores raros)
+        # no tocamos
+
+    return float(s)
+
+
+def parse_date(raw: str) -> date:
+    """
+    Intenta parsear formatos típicos que aparecen en comprobantes.
+    Devuelve date (sin hora).
+    """
+    if raw is None:
+        raise ValueError("date is None")
+
+    s = str(raw).strip()
+    s = re.sub(r"\s+", " ", s)
+
+    patterns = [
+        "%d/%m/%y %H:%M:%S",
+        "%d/%m/%Y %H:%M:%S",
+        "%d/%m/%y %H:%M",
+        "%d/%m/%Y %H:%M",
+        "%d/%m/%Y",
+        "%d/%m/%y",
+        "%Y-%m-%d",
+        "%Y-%m-%d %H:%M:%S",
+        "%Y-%m-%dT%H:%M:%S",
+        "%Y-%m-%dT%H:%M:%S.%f",
+    ]
+
+    for fmt in patterns:
+        try:
+            return datetime.strptime(s, fmt).date()
+        except ValueError:
+            pass
+
+    # Último intento con ISO flexible
+    try:
+        return datetime.fromisoformat(s).date()
+    except Exception:
+        raise ValueError(f"Unsupported date format: '{raw}'")
+
+
+def is_wallet_document(fields: List[ExtractedField]) -> bool:
+    """
+    Heurística: si parece comprobante de billetera (Mercado Pago / CVU),
+    relajamos los campos que suelen no venir como en transferencia bancaria.
+    """
+    key_text = " ".join(normalize_key(f.key) for f in fields if f.key)
+    value_text = " ".join(normalize_key(str(f.value)) for f in fields if f.value)
+
+    if "mercado pago" in key_text or "mercado pago" in value_text:
+        return True
+
+    wallet_terms = {"cvu", "cuit cuil", "cuitcuil"}
+    has_wallet_terms = any(t in key_text for t in wallet_terms)
+
+    bank_terms = {"cbu", "transferencia", "comprobante", "cbu origen", "cbu destino"}
+    looks_bank = any(t in key_text for t in bank_terms)
+
+    return has_wallet_terms and not looks_bank
+
+
+# ---------------------------
+# Textract parsing
+# ---------------------------
 def _index_blocks_by_id(blocks: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
     return {b["Id"]: b for b in blocks if "Id" in b}
 
 
 def _get_text_for_block(block: Dict[str, Any], blocks_by_id: Dict[str, Dict[str, Any]]) -> str:
-    """
-    Para KEY_VALUE_SET, KEY, VALUE, LINE, WORD.
-    """
     if block.get("BlockType") in ("LINE", "WORD"):
         return block.get("Text", "").strip()
 
@@ -256,7 +371,6 @@ def _get_text_for_block(block: Dict[str, Any], blocks_by_id: Dict[str, Dict[str,
                     continue
                 if child.get("BlockType") == "WORD":
                     text_parts.append(child.get("Text", ""))
-                # Selection elements (checkbox) si aparece
                 if child.get("BlockType") == "SELECTION_ELEMENT":
                     if child.get("SelectionStatus") == "SELECTED":
                         text_parts.append("[X]")
@@ -264,16 +378,12 @@ def _get_text_for_block(block: Dict[str, Any], blocks_by_id: Dict[str, Dict[str,
 
 
 def _extract_kv_pairs_from_forms(response: Dict[str, Any]) -> List[ExtractedField]:
-    """
-    Parsea pares Key/Value reales de AnalyzeDocument(FORMS).
-    """
     blocks = response.get("Blocks", []) or []
     if not blocks:
         return []
 
     blocks_by_id = _index_blocks_by_id(blocks)
 
-    # Map KEY block -> VALUE block ids
     key_map: Dict[str, str] = {}
 
     for b in blocks:
@@ -307,13 +417,12 @@ def _extract_kv_pairs_from_forms(response: Dict[str, Any]) -> List[ExtractedFiel
         value_text = _get_text_for_block(value_block, blocks_by_id)
 
         if key_text and value_text:
-            # Confidence: Textract suele traer confidence por block
             conf = None
             if isinstance(value_block.get("Confidence"), (int, float)):
                 conf = float(value_block["Confidence"])
             results.append(ExtractedField(key=key_text, value=value_text, confidence=conf))
 
-    # Deduplicar claves repetidas (conserva la primera)
+    # Dedup por key
     seen = set()
     deduped: List[ExtractedField] = []
     for f in results:
@@ -327,9 +436,6 @@ def _extract_kv_pairs_from_forms(response: Dict[str, Any]) -> List[ExtractedFiel
 
 
 def _extract_pairs_from_lines_by_colon(response: Dict[str, Any]) -> List[ExtractedField]:
-    """
-    Fallback: si solo tenés LINEs (como tu ejemplo), arma pares cuando ve 'Algo:' y el próximo LINE parece el valor.
-    """
     blocks = response.get("Blocks", []) or []
     lines = [b for b in blocks if b.get("BlockType") == "LINE" and b.get("Text")]
     texts = [b["Text"].strip() for b in lines]
@@ -341,14 +447,12 @@ def _extract_pairs_from_lines_by_colon(response: Dict[str, Any]) -> List[Extract
         if t.endswith(":"):
             key = t[:-1].strip()
             value = texts[i + 1].strip()
-            # Evitar casos donde el "valor" también sea una key
             if not value.endswith(":"):
                 results.append(ExtractedField(key=key, value=value))
                 i += 2
                 continue
         i += 1
 
-    # Mini-normalización (opcional): limpiar dobles espacios
     for r in results:
         r.key = re.sub(r"\s+", " ", r.key).strip()
         r.value = re.sub(r"\s+", " ", r.value).strip()
@@ -356,17 +460,11 @@ def _extract_pairs_from_lines_by_colon(response: Dict[str, Any]) -> List[Extract
     return results
 
 
-def parse_textract_response(response: Dict[str, Any]) -> DocumentRequest:
-    fields = _extract_kv_pairs_from_forms(response)
-    if not fields:
-        fields = _extract_pairs_from_lines_by_colon(response)
-    if not fields:
-        raise ValueError("No fields extracted from Textract response")
-    return build_document_request(fields)
-
-
+# ---------------------------
+# Builder tolerante (para FE)
+# ---------------------------
 def build_document_response(fields: List[ExtractedField]) -> DocumentExtractResponse:
-    normalized: dict[str, str] = {}
+    normalized: Dict[str, str] = {}
     for f in fields:
         key = normalize_key(f.key)
         alias = KEY_ALIASES.get(key)
@@ -376,16 +474,19 @@ def build_document_response(fields: List[ExtractedField]) -> DocumentExtractResp
     partial: Dict[str, Any] = {}
     missing: List[str] = []
     errors: List[ParseIssue] = []
-    raw_amount = normalized.get("amount")
+
+    # Wallet data
     wallet_cvu = normalized.get("wallet_cvu")
     if wallet_cvu:
         digits = extract_digits(wallet_cvu)
-        # CVU suele ser 22
-        partial["wallet_cvu"] = digits if len(digits) in (22,) else digits
+        partial["wallet_cvu"] = digits  # si querés validar len==22, hacelo acá
 
     wallet_cuit = normalized.get("wallet_cuit")
     if wallet_cuit:
         partial["wallet_cuit"] = extract_digits(wallet_cuit)
+
+    # amount
+    raw_amount = normalized.get("amount")
     if raw_amount:
         try:
             partial["amount"] = parse_amount(raw_amount)
@@ -393,38 +494,49 @@ def build_document_response(fields: List[ExtractedField]) -> DocumentExtractResp
             errors.append(ParseIssue(field="amount", message=f"Invalid amount '{raw_amount}': {e}"))
     else:
         missing.append("amount")
+
+    # trx_id
     trx_id = normalized.get("trx_id")
     if trx_id:
         partial["trx_id"] = trx_id
     else:
         missing.append("trx_id")
+
+    # emisor
     emisor_name = normalized.get("emisor_name")
     if emisor_name:
         partial["emisor_name"] = emisor_name
     else:
         missing.append("emisor_name")
+
     emisor_cuit = normalized.get("emisor_cuit")
     if emisor_cuit:
         partial["emisor_cuit"] = extract_digits(emisor_cuit)
     else:
         missing.append("emisor_cuit")
+
     emisor_cbu = normalized.get("emisor_cbu")
     if emisor_cbu:
         partial["emisor_cbu"] = extract_cbu(emisor_cbu)
+
+    # receptor
     receptor_name = normalized.get("receptor_name")
     if receptor_name:
         partial["receptor_name"] = receptor_name
     else:
         missing.append("receptor_name")
+
     receptor_cuit = normalized.get("receptor_cuit")
     if receptor_cuit:
         partial["receptor_cuit"] = extract_digits(receptor_cuit)
     else:
         missing.append("receptor_cuit")
+
     receptor_cbu = normalized.get("receptor_cbu")
     if receptor_cbu:
         partial["receptor_cbu"] = extract_cbu(receptor_cbu)
 
+    # date
     raw_date = normalized.get("date")
     if raw_date:
         try:
@@ -433,15 +545,15 @@ def build_document_response(fields: List[ExtractedField]) -> DocumentExtractResp
             errors.append(ParseIssue(field="date", message=f"Invalid date '{raw_date}': {e}"))
     else:
         missing.append("date")
+
+    # Relax rules for wallet docs
     wallet = is_wallet_document(fields)
     if wallet:
-      missing = [m for m in missing if m not in {
-          "emisor_name",
-          "receptor_name",
-          "receptor_cuit",
-      }]
-    REQUIRED_FOR_DOCUMENT = {"amount","trx_id","emisor_name","emisor_cuit","receptor_name","receptor_cuit","date"}
+        missing = [m for m in missing if m not in {"emisor_name", "receptor_name", "receptor_cuit"}]
+
+    REQUIRED_FOR_DOCUMENT = {"amount", "trx_id", "emisor_name", "emisor_cuit", "receptor_name", "receptor_cuit", "date"}
     has_all_required = REQUIRED_FOR_DOCUMENT.issubset(partial.keys())
+
     if not has_all_required:
         return DocumentExtractResponse(
             ok=False,
@@ -451,35 +563,36 @@ def build_document_response(fields: List[ExtractedField]) -> DocumentExtractResp
             errors=errors,
             raw_fields=fields,
         )
-    # recién acá validás
+
+    # Validación final con tu schema
     doc_payload = {k: v for k, v in partial.items() if k in DocumentRequest.model_fields}
     doc = DocumentRequest(**doc_payload)
-    return DocumentExtractResponse(ok=True, document=doc, partial=partial, missing=missing, errors=errors, raw_fields=fields)
-        
 
-def is_wallet_document(fields: List[ExtractedField]) -> bool:
-    key_text = " ".join(normalize_key(f.key) for f in fields)
-    value_text = " ".join(normalize_key(str(f.value)) for f in fields if f.value)
-    if "mercado pago" in key_text or "mercado pago" in value_text:
-        return True
-    if "numero de operacion de mercado pago" in key_text:
-        return True
-    wallet_words = {"cvu", "cuit cuil", "cuitcuil"}
-    has_wallet_terms = any(w in key_text for w in wallet_words)
-    banking_words = {"cbu", "transferencia", "comprobante", "cbu origen", "cbu destino"}
-    looks_bank = any(w in key_text for w in banking_words)
-    return has_wallet_terms and not looks_bank
+    return DocumentExtractResponse(
+        ok=True,
+        document=doc,
+        partial=partial,
+        missing=missing,
+        errors=errors,
+        raw_fields=fields,
+    )
 
 
+# ---------------------------
+# Router / endpoint
+# ---------------------------
 router = APIRouter(prefix="/extractor", tags=["textract"])
+
+
 @router.post("/aws-extract", response_model=DocumentExtractResponse)
 async def analyze_document(
     user: user_dependency,
-    file: UploadFile = File(...)
+    file: UploadFile = File(...),
 ) -> DocumentExtractResponse:
-    # --- Validaciones básicas de archivo ---
+    # Validaciones
     if not file.content_type:
         raise HTTPException(status_code=400, detail="Missing content_type")
+
     allowed = {
         "application/pdf",
         "image/jpeg",
@@ -491,89 +604,40 @@ async def analyze_document(
             status_code=400,
             detail=f"Unsupported content_type '{file.content_type}'. Allowed: {sorted(allowed)}",
         )
+
     data = await file.read()
     if not data:
         raise HTTPException(status_code=400, detail="Empty file")
-    # Textract sync limit
+
     if len(data) > 10 * 1024 * 1024:
         raise HTTPException(
             status_code=413,
             detail="File too large for synchronous Textract (max 10MB)",
         )
-    # --- Llamada a AWS Textract ---
+
+    # Llamada a Textract
     try:
         aws_resp = _textract.analyze_document(
             Document={"Bytes": data},
             FeatureTypes=["FORMS"],
         )
     except (BotoCoreError, ClientError) as e:
-        # Error real de infraestructura
-        raise HTTPException(
-            status_code=502,
-            detail=f"Textract error: {str(e)}",
-        )
+        raise HTTPException(status_code=502, detail=f"Textract error: {str(e)}")
 
-    # --- Extracción de campos ---
+    # Parseo
     fields = _extract_kv_pairs_from_forms(aws_resp)
     if not fields:
         fields = _extract_pairs_from_lines_by_colon(aws_resp)
 
     if not fields:
-        # No hay nada parseable, pero NO rompemos el FE
         return DocumentExtractResponse(
             ok=False,
             document=None,
             partial={},
             missing=[],
-            errors=[
-                ParseIssue(
-                    field="*",
-                    message="No fields extracted from Textract response",
-                )
-            ],
+            errors=[ParseIssue(field="*", message="No fields extracted from Textract response")],
             raw_fields=[],
         )
-    # --- Construcción tolerante del documento ---
-    # Esto NO lanza excepciones
+
+    # Construcción tolerante (no rompe FE)
     return build_document_response(fields)
-
-
-def parse_amount(raw: str) -> float:
-    raw = raw.replace("$", "").replace(".", "").replace(",", ".")
-    return float(raw.strip())
-
-
-def parse_date(raw: str) -> date:
-    # "24/07/20 12:35:00"
-    return datetime.strptime(raw.strip(), "%d/%m/%y %H:%M:%S").date()
-
-
-def extract_digits(raw: str) -> str:
-    return re.sub(r"\D", "", raw)
-
-
-def extract_cbu(raw: str) -> str | None:
-    digits = extract_digits(raw)
-    return digits if len(digits) == 22 else None
-
-
-def build_document_request(fields: List[ExtractedField]) -> DocumentRequest:
-    normalized: dict[str, str] = {}
-    for f in fields:
-        key = normalize_key(f.key)
-        if key in KEY_ALIASES and f.value:
-            normalized[KEY_ALIASES[key]] = f.value.strip()
-    try:
-        return DocumentRequest(
-            amount=parse_amount(normalized["amount"]),
-            trx_id=normalized["trx_id"],
-            emisor_name=normalized["emisor_name"],
-            emisor_cuit=extract_digits(normalized["emisor_cuit"]),
-            emisor_cbu=extract_cbu(normalized.get("emisor_cbu", "")),
-            receptor_name=normalized["receptor_name"],
-            receptor_cuit=extract_digits(normalized["receptor_cuit"]),
-            receptor_cbu=extract_cbu(normalized.get("receptor_cbu", "")),
-            date=parse_date(normalized["date"]),
-        )
-    except KeyError as e:
-        raise ValueError(f"Missing required field from Textract: {e}")
