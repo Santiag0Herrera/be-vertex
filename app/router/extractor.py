@@ -15,6 +15,8 @@ from pydantic import BaseModel, Field
 from app.services.auth_service import get_current_user
 from app.schemas.transactions import DocumentRequest
 
+from fastapi.concurrency import run_in_threadpool
+
 
 # ---------------------------
 # Normalización de keys
@@ -617,9 +619,14 @@ async def analyze_document(
 
     # Llamada a Textract
     try:
-        aws_resp = _textract.analyze_document(
-            Document={"Bytes": data},
-            FeatureTypes=["FORMS"],
+        # aws_resp = _textract.analyze_document(
+        #     Document={"Bytes": data},
+        #     FeatureTypes=["FORMS"],
+        # )
+        aws_resp = await run_in_threadpool(
+          _textract.analyze_document,
+          Document={"Bytes": data},
+          FeatureTypes=["FORMS"],
         )
     except (BotoCoreError, ClientError) as e:
         raise HTTPException(status_code=502, detail=f"Textract error: {str(e)}")
