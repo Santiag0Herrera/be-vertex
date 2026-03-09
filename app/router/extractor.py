@@ -205,6 +205,78 @@ KEY_ALIASES_RAW = {
     "cuil": "wallet_cuit",
     "dni": "wallet_cuit",
     "documento": "wallet_cuit",
+
+    # --- AMOUNT (monto) ---
+    "importe transferencia": "amount",
+    "importe acreditado": "amount",
+    "importe debitado": "amount",
+    "importe transferido": "amount",
+    "monto acreditado": "amount",
+    "monto debitado": "amount",
+    "monto transferido": "amount",
+    "total transferencia": "amount",
+    "importe operacion": "amount",
+    "importe operado": "amount",
+
+    # --- TRX ID (identificador de operación) ---
+    "numero operacion": "trx_id",
+    "nro de operacion": "trx_id",
+    "numero de operacion": "trx_id",
+    "id transferencia": "trx_id",
+    "codigo transferencia": "trx_id",
+    "referencia transferencia": "trx_id",
+    "nro referencia": "trx_id",
+    "numero referencia operacion": "trx_id",
+
+    # --- DATE (fecha) ---
+    "fecha transferencia": "date",
+    "fecha acreditacion": "date",
+    "fecha debito": "date",
+    "hora": "date",
+
+    # --- EMISOR (originante) ---
+    "titular origen": "emisor_name",
+    "cuenta origen titular": "emisor_name",
+    "propietario cuenta origen": "emisor_name",
+
+    # documento emisor
+    "cuit ordenante": "emisor_cuit",
+    "cuil ordenante": "emisor_cuit",
+    "dni ordenante": "emisor_cuit",
+    "documento ordenante": "emisor_cuit",
+
+    # cuenta emisor
+    "cbu cuenta origen": "emisor_cbu",
+    "numero cuenta origen": "emisor_cbu",
+    "cuenta bancaria origen": "emisor_cbu",
+
+    # --- RECEPTOR (destinatario) ---
+    "titular destino": "receptor_name",
+    "propietario cuenta destino": "receptor_name",
+
+    # documento receptor
+    "cuit beneficiario": "receptor_cuit",
+    "dni beneficiario": "receptor_cuit",
+
+    # cuenta receptor
+    "cbu cuenta destino": "receptor_cbu",
+    "numero cuenta destino": "receptor_cbu",
+    "cuenta bancaria destino": "receptor_cbu",
+
+    # --- WALLET / CVU ---
+    "alias": "wallet_cvu",
+    "alias cvu": "wallet_cvu",
+    "cvu cuenta": "wallet_cvu",
+    "cvu destino": "wallet_cvu",
+
+    "cuit cuil titular": "wallet_cuit",
+    "documento titular": "wallet_cuit",
+    "documento usuario": "wallet_cuit",
+
+    # --- OTROS CAMPOS FRECUENTES EN TRANSFERENCIAS ---
+    "tipo transferencia": "trx_id",
+    "concepto": "trx_id",
+    "motivo": "trx_id",
 }
 
 KEY_ALIASES = {normalize_key(k): v for k, v in KEY_ALIASES_RAW.items()}
