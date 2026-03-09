@@ -2,6 +2,7 @@ from sqlalchemy.orm import Session, joinedload
 from app.models import Trx, Users, CBU, Entity, CustomersBalance, EntityCBU
 from sqlalchemy import extract
 from app.schemas.transactions import DocumentRequest, MultipleDocumentRequest, UploadDocumentRequest
+import hashlib
 
 
 from .ErrorService import ErrorService
@@ -100,7 +101,7 @@ class TransactionsService:
     return self.success.response("Transaction registered!")
   
   def create_multiple(self, multiple_trx_request: MultipleDocumentRequest):
-      trx_ids = [doc.trx_id for doc in multiple_trx_request.transactions]
+      trx_ids = [doc.trx_id for doc in multiple_trx_request.transactions if doc.trx_id]
 
       account_model = self.db.query(CustomersBalance).filter(
         CustomersBalance.id == multiple_trx_request.account_id
@@ -111,10 +112,10 @@ class TransactionsService:
         Entity.id == self.req_user.get('entity_id')
       ).first()
 
+      print(entity_model.id)
       entity_cbu_model = self.db.query(EntityCBU).filter(
         EntityCBU.entity_id == entity_model.id
       ).first()
-
       self.error.raise_if_none(entity_cbu_model, "Entity CBU")
 
       cbu_model = self.db.query(CBU).filter(
@@ -131,24 +132,37 @@ class TransactionsService:
       already_created = []
 
       for doc in multiple_trx_request.transactions:
-          if doc.trx_id in already_exists_set:
-              already_created.append(doc.trx_id)
+          doc_trx_id = doc.trx_id
+          if not doc_trx_id:
+            # Fallback estable para cargas masivas cuando no llega id de operación.
+            # Evita NULL en campo unique y permite detectar duplicados del mismo payload.
+            stable_key = f"{multiple_trx_request.account_id}|{doc.amount}|{doc.date.isoformat()}|{doc.receptor_name or ''}|{doc.receptor_cuit or ''}"
+            doc_trx_id = f"AUTO-{hashlib.sha1(stable_key.encode('utf-8')).hexdigest()[:16].upper()}"
+
+          if doc_trx_id in already_exists_set:
+              already_created.append(doc_trx_id)
               continue
+
+          emisor_name = doc.emisor_name or (entity_model.name if entity_model else "UNKNOWN")
+          emisor_cuit = doc.emisor_cuit or (cbu_model.cuit if cbu_model else "00000000000")
+          emisor_cbu = doc.emisor_cbu or (cbu_model.nro if cbu_model else None)
+
           trx_model = Trx(
-            emisor_cbu=doc.emisor_cbu,
-            emisor_name=doc.emisor_name,
-            emisor_cuit=doc.emisor_cuit,
+            emisor_cbu=emisor_cbu,
+            emisor_name=emisor_name,
+            emisor_cuit=emisor_cuit,
             receptor_cbu=cbu_model.nro,
             entity_id=entity_model.id,
             amount=doc.amount,
             date=doc.date,
-            trx_id=doc.trx_id,
+            trx_id=doc_trx_id,
             account_id=multiple_trx_request.account_id,
             status="pendiente"
           )
           new_trx.append(trx_model)
           self.db.add(trx_model)
           self.db.flush()
+          already_exists_set.add(doc_trx_id)
       self.db.commit()
 
       if len(already_created) == len(multiple_trx_request.transactions):
