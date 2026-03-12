@@ -112,7 +112,6 @@ class TransactionsService:
         Entity.id == self.req_user.get('entity_id')
       ).first()
 
-      print(entity_model.id)
       entity_cbu_model = self.db.query(EntityCBU).filter(
         EntityCBU.entity_id == entity_model.id
       ).first()
@@ -121,12 +120,6 @@ class TransactionsService:
       cbu_model = self.db.query(CBU).filter(
         CBU.id == entity_cbu_model.cbu_id
       ).first()
-
-      # Consultar los trx que ya existen
-      already_exists = self.db.query(Trx.trx_id).filter(
-        Trx.trx_id.in_(trx_ids)
-      ).all()
-      already_exists_set = set(e[0] for e in already_exists)
 
       new_trx = []
       already_created = []
@@ -138,10 +131,6 @@ class TransactionsService:
             # Evita NULL en campo unique y permite detectar duplicados del mismo payload.
             stable_key = f"{multiple_trx_request.account_id}|{doc.amount}|{doc.date.isoformat()}|{doc.receptor_name or ''}|{doc.receptor_cuit or ''}"
             doc_trx_id = f"AUTO-{hashlib.sha1(stable_key.encode('utf-8')).hexdigest()[:16].upper()}"
-
-          if doc_trx_id in already_exists_set:
-              already_created.append(doc_trx_id)
-              continue
 
           emisor_name = doc.emisor_name or (entity_model.name if entity_model else "UNKNOWN")
           emisor_cuit = doc.emisor_cuit or (cbu_model.cuit if cbu_model else "00000000000")
@@ -162,7 +151,6 @@ class TransactionsService:
           new_trx.append(trx_model)
           self.db.add(trx_model)
           self.db.flush()
-          already_exists_set.add(doc_trx_id)
       self.db.commit()
 
       if len(already_created) == len(multiple_trx_request.transactions):
