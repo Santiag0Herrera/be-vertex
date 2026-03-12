@@ -1011,7 +1011,7 @@ async def analyze_document(
       try:
           doc = fitz.open(stream=data, filetype="pdf")
           page = doc.load_page(0)
-          pix = page.get_pixmap(dpi=300)
+          pix = page.get_pixmap(dpi=200)
           img_buffer = BytesIO(pix.tobytes("png"))
           data = img_buffer.getvalue()
       except Exception as e:
