@@ -125,12 +125,10 @@ class TransactionsService:
       already_created = []
 
       for doc in multiple_trx_request.transactions:
-          doc_trx_id = doc.trx_id
-          if not doc_trx_id:
-            # Fallback estable para cargas masivas cuando no llega id de operación.
-            # Evita NULL en campo unique y permite detectar duplicados del mismo payload.
-            stable_key = f"{multiple_trx_request.account_id}|{doc.amount}|{doc.date.isoformat()}|{doc.receptor_name or ''}|{doc.receptor_cuit or ''}"
-            doc_trx_id = f"AUTO-{hashlib.sha1(stable_key.encode('utf-8')).hexdigest()[:16].upper()}"
+          # Fallback estable para cargas masivas cuando no llega id de operación.
+          # Evita NULL en campo unique y permite detectar duplicados del mismo payload.
+          stable_key = f"{multiple_trx_request.account_id}|{doc.amount}|{doc.date.isoformat()}|{doc.receptor_name or ''}|{doc.receptor_cuit or ''}"
+          doc_trx_id = f"AUTO-{hashlib.sha1(stable_key.encode('utf-8')).hexdigest()[:16].upper()}"
 
           emisor_name = doc.emisor_name or (entity_model.name if entity_model else "UNKNOWN")
           emisor_cuit = doc.emisor_cuit or (cbu_model.cuit if cbu_model else "00000000000")
