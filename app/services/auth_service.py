@@ -1,4 +1,4 @@
-from app.models import Users, Entity
+from app.models import Users, Entity, Clients
 from typing import Annotated
 from app.db.database import get_db
 from sqlalchemy.orm import Session
@@ -17,9 +17,12 @@ db_dependency = Annotated[Session, Depends(get_db)]
 oauth2_bearer = OAuth2PasswordBearer(tokenUrl='auth/token')
 
 def authenticate_user(email: str, password: str, db):
-  user = db.query(Users).filter(Users.email == email.lower()).first()
+  user = db.query(Clients).filter(Clients.email == email.lower()).first()
   if not user:
-    return False
+    user = db.query(Users).filter(Users.email == email.lower()).first()
+  if not user:
+      return False
+      
   if not bcrypt_context.verify(password, user.hashed_password):
     return False
   return user

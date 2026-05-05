@@ -109,13 +109,14 @@ async def run() -> None:
           account_cbu = acc.get("account_cbu")
           trx_receptor_cbu = trx.get("trx_receptor_cbu")
           # COMPARAMOS CBU
+          trx_id = trx.get("id")
           if account_cbu == trx_receptor_cbu:
               trx_matched_count += 1
               # BUSCAMOS LA TRX PENDIENTE DE VALIDAR
               date = trx.get("trx_date").date()
-              trx_id = trx.get("trx_id")
               trx_customer_balance_id = trx.get("customer_balance_id")
               trx_amount = trx.get("trx_amount")
+              trx_id = f"{trx_id} - {date} - {trx_amount}"
               trx_date_since = (date - datetime.timedelta(days=1)).isoformat()
               trx_date_until = (date + datetime.timedelta(days=1)).isoformat()
               ib_movements_result = await ib_service.get_movement(
@@ -124,11 +125,12 @@ async def run() -> None:
                   date_since=trx_date_since,
                   date_until=trx_date_until
               )
+              print("    |")
+              print(f"    |Buscando trx: {trx_id}")
               # POR CADA MOVIMIENTO ENCONTRADO EN EL RANGO DE FECHA, PARA ESA CUENTA, NOS FIJAMOS SI EXISTE ALGUN MATCH
               is_match = match_trx_with_ib(trx, ib_movements_result["movements_detail"])
               if is_match:
                   update_trx_status(trx_id=trx_id, new_status="conciliado", trx_customer_balance_id=trx_customer_balance_id, trx_amount=trx_amount)
-                  print("    |")
                   print(f"    |_ Trx {trx_id} pendiente --> conciliado")
                   updated_trx_count += 1
               else:
