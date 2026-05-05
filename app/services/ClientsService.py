@@ -35,15 +35,12 @@ class ClientService():
       Clients.email == new_client_request.email.strip().lower()
     ).first()
 
-    if client_exists_model:
-      self.error.raise_conflict(f"Cliente {client_exists_model.email} ya existe.")
-
     user_exists_model = self.db.query(Users).filter(
       Users.email == new_client_request.email.strip().lower()
     ).first()
 
-    if user_exists_model:
-      self.error.raise_conflict(f"Usuario {user_exists_model.email} ya existe.")
+    if client_exists_model or user_exists_model:
+      self.error.raise_conflict(f"Cliente {new_client_request.email} ya existe.")
     
     auto_generated_password = (new_client_request.first_name[:2] + new_client_request.last_name + "123").lower()
 

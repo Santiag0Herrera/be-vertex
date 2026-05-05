@@ -17,12 +17,12 @@ db_dependency = Annotated[Session, Depends(get_db)]
 oauth2_bearer = OAuth2PasswordBearer(tokenUrl='auth/token')
 
 def authenticate_user(email: str, password: str, db):
-  user = db.query(Clients).filter(Clients.email == email.lower()).first()
+  normalized_email = email.lower()
+  user = db.query(Clients).filter(Clients.email == normalized_email).first()
   if not user:
-    user = db.query(Users).filter(Users.email == email.lower()).first()
+    user = db.query(Users).filter(Users.email == normalized_email).first()
   if not user:
-      return False
-      
+    return False
   if not bcrypt_context.verify(password, user.hashed_password):
     return False
   return user

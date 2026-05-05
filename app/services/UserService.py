@@ -1,6 +1,6 @@
 from sqlalchemy.orm import Session
 from sqlalchemy import func
-from app.models import Users, Permission
+from app.models import Users, Permission, Clients
 from app.schemas.users import ChangePasswordRequest, CreateUserRequest, ChangePermissonRequest, ChangeUserInfoRequest
 from app.services.auth_service import bcrypt_context
 
@@ -84,8 +84,9 @@ class UserService():
     Creates a new user in the requesting user's entity.
     """
     user_exists_model = self.db.query(Users).filter(func.lower(Users.email) == create_user_request.email.lower()).first()
+    client_exists_model = self.db.query(Clients).filter(func.lower(Clients.email) == create_user_request.email.lower()).first()
   
-    if user_exists_model:
+    if user_exists_model or client_exists_model:
       self.error.raise_conflict(f"Usuario {create_user_request.email} ya existe.")
     
     auto_generated_password = (create_user_request.first_name[:2] + create_user_request.last_name + "123").lower()

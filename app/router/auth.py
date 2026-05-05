@@ -17,30 +17,30 @@ router = APIRouter(
   tags=['Authentication']
 )
 
-@router.post("/", status_code=status.HTTP_201_CREATED)
-async def create_user(db: db_dependency, create_user_request: CreateUserRequest):
-  # FIRST WE VALIDATE IF THE ENTITY EXISTS
-  entity_model = db.query(Entity).filter(Entity.name == create_user_request.entity).first()
-  if entity_model is None:
-    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Entity {create_user_request.entity} not found.")
+# @router.post("/", status_code=status.HTTP_201_CREATED)
+# async def create_user(db: db_dependency, create_user_request: CreateUserRequest):
+#   # FIRST WE VALIDATE IF THE ENTITY EXISTS
+#   entity_model = db.query(Entity).filter(Entity.name == create_user_request.entity).first()
+#   if entity_model is None:
+#     raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Entity {create_user_request.entity} not found.")
   
-  # IF ENTITY EXISTS, THEN WE VALIDATE IF USER'S PERMISSION EXISTS
-  permission_model = db.query(Permission).filter(Permission.level == create_user_request.permission_level).first()
-  if permission_model is None:
-    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Permission {create_user_request.permission_level} not found.")
+#   # IF ENTITY EXISTS, THEN WE VALIDATE IF USER'S PERMISSION EXISTS
+#   permission_model = db.query(Permission).filter(Permission.level == create_user_request.permission_level).first()
+#   if permission_model is None:
+#     raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Permission {create_user_request.permission_level} not found.")
   
-  # IF ENTITY AND PERMISSION, BOTH EXIST, WE CREATE THE USER WITH BOTH FK
-  create_user_model = Users(
-    first_name=create_user_request.first_name,
-    last_name=create_user_request.last_name,
-    email=create_user_request.email,
-    hashed_password=bcrypt_context.hash(create_user_request.password),
-    phone=create_user_request.phone,
-    perm_id=permission_model.id,
-    entity_id=entity_model.id
-  )
-  db.add(create_user_model)
-  db.commit()
+#   # IF ENTITY AND PERMISSION, BOTH EXIST, WE CREATE THE USER WITH BOTH FK
+#   create_user_model = Users(
+#     first_name=create_user_request.first_name,
+#     last_name=create_user_request.last_name,
+#     email=create_user_request.email,
+#     hashed_password=bcrypt_context.hash(create_user_request.password),
+#     phone=create_user_request.phone,
+#     perm_id=permission_model.id,
+#     entity_id=entity_model.id
+#   )
+#   db.add(create_user_model)
+#   db.commit()
 
 
 @router.post("/token", response_model=Token)
