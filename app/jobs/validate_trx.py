@@ -154,10 +154,10 @@ def update_trx_status(
 async def run() -> None:
     started_at = datetime.datetime.now()
     current_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    header = f" VALIDATE TRX JOB | {current_time} "
-    logger.info("=" * 120)
-    logger.info(header.center(120, "="))
-    logger.info("=" * 120)
+    logger.info("")
+    logger.info("======================================================================")
+    logger.info("VALIDATE TRX JOB | %s", current_time)
+    logger.info("======================================================================")
 
     ib_service = InterBankingService()
 
