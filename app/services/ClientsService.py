@@ -1,6 +1,6 @@
 from typing import List
 from sqlalchemy import select
-from app.models import Clients, Users, Permission
+from app.models import Clients, Users, Permission, CustomersBalance
 from sqlalchemy.orm import Session
 from .ErrorService import ErrorService
 from .SuccessService import SuccessService
@@ -74,5 +74,56 @@ class ClientService():
     self.db.commit()
     return self.success.response(f"Cliente {client_model.first_name} {client_model.last_name} fue eliminado exitosamente.")
     
+  
+  def get_current(self):
+    client_model = self.db.query(Clients).filter(
+        Clients.id == self.req_user.get("id")
+    ).first()
 
-    
+    if client_model is None:
+        self.error.raise_not_found("Cliente")
+
+    if client_model.entity is None:
+        self.error.raise_not_found("Entidad asociada al cliente")
+
+    return self.success.response({
+        'id': client_model.id,
+        'first_name': client_model.first_name,
+        'last_name': client_model.last_name,
+        'email': client_model.email,
+        'permission_level': client_model.permission,
+        'phone': client_model.phone,
+        'accounts': [
+            {
+                'id': balance.id,
+                'balance_amount': balance.balance_amount,
+                'last_update': balance.last_update,
+                'currency': {
+                    'id': balance.currency.id,
+                    'name': balance.currency.name
+                } if balance.currency else None
+            }
+            for balance in client_model.balance
+        ],
+        'entity': {
+            'name': client_model.entity.name,
+            'id': client_model.entity.id,
+            'accounts': [
+                {
+                    'id': entity_cbu.id,
+                    'cbu': {
+                        'id': entity_cbu.cbu.id,
+                        'nro': entity_cbu.cbu.nro,
+                        'banco': entity_cbu.cbu.banco,
+                        'alias': entity_cbu.cbu.alias,
+                        'cuit': entity_cbu.cbu.cuit
+                    } if entity_cbu.cbu else None,
+                    'currency': {
+                        'id': entity_cbu.currency.id,
+                        'name': entity_cbu.currency.name
+                    } if entity_cbu.currency else None
+                }
+                for entity_cbu in client_model.entity.cbus
+            ]
+        }
+    })

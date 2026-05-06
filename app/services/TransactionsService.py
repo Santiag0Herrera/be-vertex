@@ -2,8 +2,8 @@ from sqlalchemy.orm import Session, joinedload
 from app.models import Trx, Users, CBU, Entity, CustomersBalance, EntityCBU
 from sqlalchemy import extract
 from app.schemas.transactions import DocumentRequest, MultipleDocumentRequest, UploadDocumentRequest
+import uuid
 import hashlib
-
 
 from .ErrorService import ErrorService
 from .SuccessService import SuccessService
@@ -100,41 +100,60 @@ class TransactionsService:
     self.db.commit()
     return self.success.response("Transaction registered!")
   
+
   def create_multiple(self, multiple_trx_request: MultipleDocumentRequest):
-      trx_ids = [doc.trx_id for doc in multiple_trx_request.transactions if doc.trx_id]
-
-      account_model = self.db.query(CustomersBalance).filter(
+    account_model = self.db.query(CustomersBalance).filter(
         CustomersBalance.id == multiple_trx_request.account_id
-      )
-      self.error.raise_if_none(account_model, "Clinet Account")
-
-      entity_model = self.db.query(Entity).filter(
-        Entity.id == self.req_user.get('entity_id')
-      ).first()
-
-      entity_cbu_model = self.db.query(EntityCBU).filter(
+    ).first()
+    self.error.raise_if_none(account_model, "Client Account")
+    entity_model = self.db.query(Entity).filter(
+        Entity.id == self.req_user.get("entity_id")
+    ).first()
+    self.error.raise_if_none(entity_model, "Entity")
+    entity_cbu_model = self.db.query(EntityCBU).filter(
         EntityCBU.entity_id == entity_model.id
-      ).first()
-      self.error.raise_if_none(entity_cbu_model, "Entity CBU")
-
-      cbu_model = self.db.query(CBU).filter(
+    ).first()
+    self.error.raise_if_none(entity_cbu_model, "Entity CBU")
+    cbu_model = self.db.query(CBU).filter(
         CBU.id == entity_cbu_model.cbu_id
-      ).first()
-
-      new_trx = []
-      already_created = []
-
-      for doc in multiple_trx_request.transactions:
-          # Fallback estable para cargas masivas cuando no llega id de operación.
-          # Evita NULL en campo unique y permite detectar duplicados del mismo payload.
-          stable_key = f"{multiple_trx_request.account_id}|{doc.amount}|{doc.date.isoformat()}|{doc.receptor_name or ''}|{doc.receptor_cuit or ''}"
-          doc_trx_id = f"AUTO-{hashlib.sha1(stable_key.encode('utf-8')).hexdigest()[:16].upper()}"
-
-          emisor_name = doc.emisor_name or (entity_model.name if entity_model else "UNKNOWN")
-          emisor_cuit = doc.emisor_cuit or (cbu_model.cuit if cbu_model else "00000000000")
-          emisor_cbu = doc.emisor_cbu or (cbu_model.nro if cbu_model else None)
-
-          trx_model = Trx(
+    ).first()
+    self.error.raise_if_none(cbu_model, "CBU")
+    new_trx = []
+    already_created = []
+    used_fingerprints = set()
+    for doc in multiple_trx_request.transactions:
+        trx_datetime = doc.date.isoformat()
+        stable_key = (
+            f"{multiple_trx_request.account_id}|"
+            f"{doc.amount}|"
+            f"{trx_datetime}"
+        )
+        document_fingerprint = hashlib.sha1(
+            stable_key.encode("utf-8")
+        ).hexdigest()
+        if document_fingerprint in used_fingerprints:
+            already_created.append({
+                "amount": doc.amount,
+                "date": doc.date,
+                "reason": "Duplicate in current request"
+            })
+            continue
+        used_fingerprints.add(document_fingerprint)
+        existing_trx = self.db.query(Trx).filter(
+            Trx.document_fingerprint == document_fingerprint
+        ).first()
+        if existing_trx:
+            already_created.append({
+                "trx_id": existing_trx.trx_id,
+                "amount": doc.amount,
+                "date": doc.date,
+                "reason": "Already exists in database"
+            })
+            continue
+        emisor_name = doc.emisor_name or entity_model.name
+        emisor_cuit = doc.emisor_cuit or cbu_model.cuit
+        emisor_cbu = doc.emisor_cbu or cbu_model.nro
+        trx_model = Trx(
             emisor_cbu=emisor_cbu,
             emisor_name=emisor_name,
             emisor_cuit=emisor_cuit,
@@ -142,24 +161,22 @@ class TransactionsService:
             entity_id=entity_model.id,
             amount=doc.amount,
             date=doc.date,
-            trx_id=doc_trx_id,
+            trx_id=f"AUTO-{uuid.uuid4().hex[:16].upper()}",
+            document_fingerprint=document_fingerprint,
             account_id=multiple_trx_request.account_id,
             status="pendiente"
-          )
-          new_trx.append(trx_model)
-          self.db.add(trx_model)
-          self.db.flush()
-      self.db.commit()
+        )
+        new_trx.append(trx_model)
+        self.db.add(trx_model)
+    if len(already_created) == len(multiple_trx_request.transactions):
+        self.error.raise_conflict("All transactions already exist")
+    self.db.commit()
+    return self.success.response({
+        "created": len(new_trx),
+        "duplicates": already_created
+    })
 
-      if len(already_created) == len(multiple_trx_request.transactions):
-        self.error.raise_conflict("All transactions already exists")
 
-      result = {
-          "created": len(new_trx),
-          "duplicates": already_created
-      }
-      return self.success.response(result)
-  
   async def upload_file(self, upload_document_request: UploadDocumentRequest):
     response = await self.n8n_service.ai_extract_info(upload_document_request)
     self.error.raise_if_none(response, "Document info")

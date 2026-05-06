@@ -45,9 +45,11 @@ class EntityCBU(Base):
     id = Column(Integer, primary_key=True)
     entity_id = Column(Integer, ForeignKey("entities.id"), nullable=False)
     cbu_id = Column(Integer, ForeignKey("cbus.id"), nullable=False)
+    currency_id = Column(Integer, ForeignKey("currency.id"), nullable=False)
 
     entity = relationship("Entity", back_populates="cbus")
-    cbu = relationship("CBU")
+    cbu = relationship("CBU", back_populates="entities")
+    currency = relationship("Currency", back_populates="entity_cbus")
 
 # Permission Model
 class Permission(Base):
@@ -81,6 +83,7 @@ class Product(Base):
 class Trx(Base):
     __tablename__ = "trx"
 
+    document_fingerprint = Column(String, nullable=True, index=True)
     id = Column(Integer, primary_key=True, index=True)
     trx_id = Column(String, unique=True)
     emisor_cbu = Column(String, nullable=True)
@@ -163,7 +166,7 @@ class Clients(Base):
 
     entity = relationship("Entity", back_populates="clients")
     permission = relationship("Permission", back_populates="clients")
-    balance = relationship("CustomersBalance", back_populates="client", uselist=False)  # ⇦ balance⇄client
+    balance = relationship("CustomersBalance", back_populates="client", uselist=True)  # ⇦ balance⇄client
     trxs = relationship("Trx", back_populates="client")                                  # ⇦ nuevo
 
 
@@ -187,3 +190,4 @@ class Currency(Base):
     name = Column(String, nullable=False)
 
     balances = relationship("CustomersBalance", back_populates="currency")
+    entity_cbus = relationship("EntityCBU", back_populates="currency")

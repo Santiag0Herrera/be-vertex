@@ -36,3 +36,16 @@ async def delete_client_by_id(db: db_dependency, user: user_dependency, client_i
   db_service = DBService(db=db, req_user=user)
   delete_client_model = db_service.client.delete(client_id)
   return delete_client_model
+
+@router.get("/me", status_code=status.HTTP_200_OK)
+async def get_client_by_id(db: db_dependency, user: user_dependency):
+  db_service = DBService(db=db, req_user=user)
+  get_client_model = db_service.client.get_current()
+  return get_client_model
+
+
+@router.get("/accounts", status_code=status.HTTP_200_OK)
+async def get_client_accounts(db: db_dependency, user: user_dependency, client_id: int):
+  db_service = DBService(db=db, req_user=user)
+  get_accounts_model = db_service.client.get_accounts_by_client_id(client_id)
+  return get_accounts_model
