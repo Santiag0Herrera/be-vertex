@@ -357,8 +357,12 @@ def parse_amount(raw: str) -> float:
         # Si solo tiene coma, la tratamos como decimal
         if "," in s:
             s = s.replace(".", "").replace(",", ".")
-        # Si solo tiene punto, lo dejamos como decimal (y removemos separadores raros)
-        # no tocamos
+        elif "." in s:
+            integer, fraction = s.rsplit(".", 1)
+            if len(fraction) == 3 and integer.replace(".", "").isdigit():
+                # "1.230" => 1230 (miles)
+                s = s.replace(".", "")
+            # Si no es un separador de miles claro, lo dejamos como decimal
 
     return float(s)
 

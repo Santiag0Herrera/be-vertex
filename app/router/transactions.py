@@ -73,3 +73,10 @@ async def get_all_movements(user: user_dependency, date_since: Optional[str], da
   ib_service = InterBankingService()
   movements_model = await ib_service.get_movements_for_all_accounts(date_since=date_since, date_until=date_until)
   return movements_model
+
+
+@router.get("/get_accounts", status_code=status.HTTP_200_OK)
+async def get_accounts(user: user_dependency):
+    ib_service = InterBankingService()
+    accounts_model = await ib_service.get_accounts_only()
+    return accounts_model

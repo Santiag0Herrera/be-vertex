@@ -84,6 +84,10 @@ def parse_amount(raw: str) -> float:
         value = value.replace(".", "").replace(",", ".")
     elif value.count(".") > 1:
         value = value.replace(".", "")
+    elif "." in value:
+        integer, fraction = value.rsplit(".", 1)
+        if len(fraction) == 3 and integer.replace(".", "").isdigit():
+            value = value.replace(".", "")
 
     return float(value)
 

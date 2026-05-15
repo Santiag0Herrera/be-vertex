@@ -74,11 +74,14 @@ def field_score(field: ExtractedField) -> float:
 
 
 def first_amount_match(value: str) -> str | None:
+    matches = []
     for pattern in AMOUNT_PATTERNS:
-        match = pattern.search(value)
-        if match:
-            return match.group()
-    return None
+        matches.extend(match.group() for match in pattern.finditer(value))
+
+    if not matches:
+        return None
+
+    return max(matches, key=len)
 
 
 def infer_document_target(key_norm: str) -> str:

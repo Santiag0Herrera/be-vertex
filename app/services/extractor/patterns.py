@@ -4,10 +4,16 @@ import re
 
 
 AMOUNT_PATTERNS = [
-    re.compile(r"(?:ar\$|ars|\$|u\$s|usd)?\s*[+-]?\d{1,3}(?:[.\s]\d{3})+(?:,\d{2})", re.IGNORECASE),
-    re.compile(r"(?:ar\$|ars|\$|u\$s|usd)?\s*[+-]?\d{1,3}(?:,\d{3})+(?:\.\d{2})", re.IGNORECASE),
-    re.compile(r"(?:ar\$|ars|\$|u\$s|usd)?\s*[+-]?\d+(?:[.,]\d{2})", re.IGNORECASE),
-    re.compile(r"(?:ar\$|ars|\$|u\$s|usd)\s*[+-]?\d+", re.IGNORECASE),
+    re.compile(
+        r"(?:ar\$|ars|\$|u\$s|usd)?\s*[+-]?\d{1,3}(?:[.\s]\d{3})+(?:,\d{2})?\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"(?:ar\$|ars|\$|u\$s|usd)?\s*[+-]?\d{1,3}(?:,\d{3})+(?:\.\d{2})?\b",
+        re.IGNORECASE,
+    ),
+    re.compile(r"(?:ar\$|ars|\$|u\$s|usd)?\s*[+-]?\d+(?:[.,]\d{2})\b", re.IGNORECASE),
+    re.compile(r"(?:ar\$|ars|\$|u\$s|usd)\s*[+-]?\d+\b", re.IGNORECASE),
 ]
 
 CUIT_REGEX = re.compile(r"\b\d{2}[-\s]?\d{8}[-\s]?\d\b")

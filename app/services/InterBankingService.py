@@ -149,3 +149,10 @@ class InterBankingService:
     repsonse = requests.request("GET", url=url, headers=headers, data=payload)
     result = repsonse.json()
     return result
+  
+  async def get_accounts_only(self):
+    accounts_model = await self.get_accounts()
+    accounts = accounts_model.get("accounts")
+    if not accounts:
+      self.error.raise_not_found(accounts)
+    return accounts
