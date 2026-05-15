@@ -975,7 +975,7 @@ def build_document_response(fields: List[ExtractedField]) -> DocumentExtractResp
         raw_fields=fields,
     )
 
-router = APIRouter(prefix="/extractor", tags=["textract"])
+router = APIRouter(prefix="/extractor", tags=["Textract"])
 @router.post("/aws-extract", response_model=DocumentExtractResponse)
 async def analyze_document(
     user: user_dependency,
