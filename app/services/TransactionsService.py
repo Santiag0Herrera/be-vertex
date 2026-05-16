@@ -110,14 +110,9 @@ class TransactionsService:
         Entity.id == self.req_user.get("entity_id")
     ).first()
     self.error.raise_if_none(entity_model, "Entity")
-    entity_cbu_model = self.db.query(EntityCBU).filter(
-        EntityCBU.entity_id == entity_model.id
-    ).first()
-    self.error.raise_if_none(entity_cbu_model, "Entity CBU")
-    cbu_model = self.db.query(CBU).filter(
-        CBU.id == entity_cbu_model.cbu_id
-    ).first()
-    self.error.raise_if_none(cbu_model, "CBU")
+    receptor_account_number = multiple_trx_request.owner_account_number
+    if not receptor_account_number:
+        self.error.raise_bad_request("Owner account number is required")
     new_trx = []
     already_created = []
     used_fingerprints = set()
@@ -125,6 +120,7 @@ class TransactionsService:
         trx_datetime = doc.date.isoformat()
         stable_key = (
             f"{multiple_trx_request.account_id}|"
+            f"{receptor_account_number}|"
             f"{doc.amount}|"
             f"{trx_datetime}"
         )
@@ -151,13 +147,13 @@ class TransactionsService:
             })
             continue
         emisor_name = doc.emisor_name or entity_model.name
-        emisor_cuit = doc.emisor_cuit or cbu_model.cuit
-        emisor_cbu = doc.emisor_cbu or cbu_model.nro
+        emisor_cuit = '-'
+        emisor_cbu = doc.emisor_cbu or receptor_account_number
         trx_model = Trx(
             emisor_cbu=emisor_cbu,
             emisor_name=emisor_name,
             emisor_cuit=emisor_cuit,
-            receptor_cbu=cbu_model.nro,
+            receptor_cbu=receptor_account_number,
             entity_id=entity_model.id,
             amount=doc.amount,
             date=doc.date,
@@ -168,6 +164,7 @@ class TransactionsService:
         )
         new_trx.append(trx_model)
         self.db.add(trx_model)
+
     if len(already_created) == len(multiple_trx_request.transactions):
         self.error.raise_conflict("All transactions already exist")
     self.db.commit()

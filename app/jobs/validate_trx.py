@@ -39,6 +39,10 @@ WHERE trx.status = 'pendiente';
 """
 
 
+def normalize_account(value):
+    return str(value or "").replace(" ", "").replace("-", "").strip()
+
+
 def get_bank_name_from_cbu(cbu: str) -> str:
     bank_code = cbu[:3]
     return codes.get(bank_code, "Banco desconocido")
@@ -49,11 +53,9 @@ def get_pending_trx():
 
     try:
         return db.execute(text(SQL)).mappings().all()
-
     except Exception:
         logger.exception("[ERROR] failed_to_fetch_pending_transactions")
         raise
-
     finally:
         db.close()
 
@@ -68,15 +70,28 @@ def match_trx_with_ib(trx, ib_movements):
 
     for mov in ib_movements:
         mov_amount = normalize_amount(mov.get("amount"))
-
         mov_date = datetime.datetime.fromisoformat(
             mov.get("movement_date")
         ).date()
+        mov_type = mov.get("debit_credit_type")
 
         amount_matches = abs(trx_amount) == abs(mov_amount)
         date_matches = trx_date == mov_date
+        type_matches = mov_type == "C"
 
-        if amount_matches and date_matches:
+        if amount_matches or date_matches:
+            logger.info(
+                "[IB CANDIDATE] trx_amount=%s mov_amount=%s amount_match=%s trx_date=%s mov_date=%s date_match=%s type=%s",
+                trx_amount,
+                mov_amount,
+                amount_matches,
+                trx_date,
+                mov_date,
+                date_matches,
+                mov_type,
+            )
+
+        if amount_matches and date_matches and type_matches:
             return mov
 
     return None
@@ -106,12 +121,10 @@ def update_trx_status(
 
         if result.rowcount == 0:
             db.rollback()
-
             logger.warning(
                 "[WARNING] trx_not_updated trx_id=%s reason=not_found_or_not_pending",
                 trx_id,
             )
-
             return False
 
         db.execute(
@@ -139,21 +152,16 @@ def update_trx_status(
 
     except Exception:
         db.rollback()
-
-        logger.exception(
-            "[ERROR] failed_to_update_transaction trx_id=%s",
-            trx_id,
-        )
-
+        logger.exception("[ERROR] failed_to_update_transaction trx_id=%s", trx_id)
         raise
-
     finally:
         db.close()
 
 
 async def run() -> None:
     started_at = datetime.datetime.now()
-    current_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    current_time = started_at.strftime("%Y-%m-%d %H:%M:%S")
+
     logger.info("")
     logger.info("======================================================================")
     logger.info("VALIDATE TRX JOB | %s", current_time)
@@ -173,9 +181,7 @@ async def run() -> None:
     )
 
     if not pending_transactions:
-        logger.info(
-            "[JOB END] no_pending_transactions_found"
-        )
+        logger.info("[JOB END] no_pending_transactions_found")
         return
 
     updated_trx_count = 0
@@ -188,9 +194,14 @@ async def run() -> None:
         bank_number = acc.get("bank_number")
         bank_name = acc.get("bank_name")
 
+        normalized_account_number = normalize_account(account_number)
+        normalized_account_cbu = normalize_account(account_cbu)
+
         account_pending_trx = [
-            trx for trx in pending_transactions
-            if trx.get("trx_receptor_cbu") == account_cbu
+            trx
+            for trx in pending_transactions
+            if normalize_account(trx.get("trx_receptor_cbu"))
+            in [normalized_account_cbu, normalized_account_number]
         ]
 
         logger.info(
@@ -211,23 +222,22 @@ async def run() -> None:
             trx_date = trx.get("trx_date").date()
             trx_amount = trx.get("trx_amount")
             trx_currency = trx.get("currency_name")
+            trx_receptor_cbu = trx.get("trx_receptor_cbu")
             customer_balance_id = trx.get("customer_balance_id")
 
             logger.info(
-                "[TRX] checking trx_id=%s amount=%s currency=%s date=%s",
+                "[TRX] checking trx_id=%s amount=%s currency=%s date=%s receptor=%s account_number=%s account_cbu=%s",
                 trx_id,
                 trx_amount,
                 trx_currency,
                 trx_date,
+                trx_receptor_cbu,
+                account_number,
+                account_cbu,
             )
 
-            trx_date_since = (
-                trx_date - datetime.timedelta(days=1)
-            ).isoformat()
-
-            trx_date_until = (
-                trx_date + datetime.timedelta(days=1)
-            ).isoformat()
+            trx_date_since = (trx_date - datetime.timedelta(days=1)).isoformat()
+            trx_date_until = (trx_date + datetime.timedelta(days=1)).isoformat()
 
             try:
                 ib_movements_result = await ib_service.get_movement(
@@ -237,10 +247,7 @@ async def run() -> None:
                     date_until=trx_date_until,
                 )
 
-                movements = ib_movements_result.get(
-                    "movements_detail",
-                    [],
-                )
+                movements = ib_movements_result.get("movements_detail", [])
 
                 logger.info(
                     "[IB FETCH] trx_id=%s movements=%s range_start=%s range_end=%s",
@@ -250,10 +257,7 @@ async def run() -> None:
                     trx_date_until,
                 )
 
-                matched_movement = match_trx_with_ib(
-                    trx,
-                    movements,
-                )
+                matched_movement = match_trx_with_ib(trx, movements)
 
                 if matched_movement:
                     logger.info(
@@ -274,15 +278,12 @@ async def run() -> None:
 
                     if updated:
                         updated_trx_count += 1
-
                         logger.info(
                             "[TRX UPDATED] trx_id=%s status=conciliado",
                             trx_id,
                         )
-
                     else:
                         skipped_trx_count += 1
-
                         logger.warning(
                             "[WARNING] trx_update_skipped trx_id=%s",
                             trx_id,
@@ -298,7 +299,6 @@ async def run() -> None:
 
             except Exception:
                 skipped_trx_count += 1
-
                 logger.exception(
                     "[ERROR] trx_validation_failed trx_id=%s account_number=%s",
                     trx_id,
@@ -306,10 +306,7 @@ async def run() -> None:
                 )
 
     finished_at = datetime.datetime.now()
-
-    duration = (
-        finished_at - started_at
-    ).total_seconds()
+    duration = (finished_at - started_at).total_seconds()
 
     logger.info(
         "[JOB END] validate_trx checked=%s conciliated=%s skipped=%s still_pending=%s duration_seconds=%.2f",

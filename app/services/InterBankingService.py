@@ -84,6 +84,26 @@ class InterBankingService:
     response = requests.request("GET", url, headers=headers, data=payload)
     result = response.json()
     return result
+  
+  async def get_historical_movement(self, account_number, bank_number, date_since, date_until):
+    """
+    Obtains movements
+    """
+    await self._update_token()
+    url = f"{self.ib_api_url}{account_number}/movements/ZUGHUS?bank-number={bank_number}&customer-id={self.customer_id}"
+    if date_since:
+       url += f"&date-since={date_since}"
+    if date_until:
+       url += f"&date-until={date_until}"
+    payload = {}
+    headers = {
+      'Accept': 'application/json',
+      'Authorization': f"Bearer {self.token.get('access_token')}",
+      'client_id': self.client_id
+    }
+    response = requests.request("GET", url, headers=headers, data=payload)
+    result = response.json()
+    return result
 
 
   async def get_movements_for_all_accounts(self, date_since: Optional[str], date_until: Optional[str]):

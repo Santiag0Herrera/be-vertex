@@ -48,6 +48,25 @@ async def upload_new_file(db: db_dependency,  user: user_dependency, upload_docu
   uploaded_file = await db_service.trx.upload_file(upload_document_request)
   return uploaded_file
 
+@router.get("/get_movement", status_code=status.HTTP_200_OK)
+async def get_movements_from_interbanking(
+    user: user_dependency, 
+    account_number: str = Query(...), 
+    bank_number: str = Query(...), 
+    date_since: Optional[str] = Query(None), 
+    date_until: Optional[str] = Query(None)
+):
+  ib_service = InterBankingService()
+  movements_model = await ib_service.get_movement(
+    account_number, 
+    bank_number,
+    date_since=date_since,
+    date_until=date_until
+  )
+  # bank_number: 015
+  # account_number: 09170210248397
+  return movements_model
+
 @router.post("/get_movements", status_code=status.HTTP_200_OK)
 async def get_movements_from_interbanking(user: user_dependency, movements_request: MovementsRequest):
   ib_service = InterBankingService()

@@ -37,6 +37,7 @@ class DocumentRequest(BaseModel):
 class MultipleDocumentRequest(BaseModel):
   transactions: list[DocumentRequest]
   account_id: int
+  owner_account_number: str
 
 class UploadDocumentRequest(BaseModel):
   base64: str
