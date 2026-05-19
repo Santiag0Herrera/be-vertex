@@ -22,11 +22,13 @@ class CustomerBalanceService:
     self.error.raise_if_none(balance_model, "Balance")
     return self.success.response(balance_model)
 
+
   def add_amount(self, id, amount_added):
     balance_model = self._get_balance(id)
     balance_model.balance_amount = balance_model.balance_amount + amount_added
     self.db.add(balance_model)
     self.db.commit()
+
 
   def subtract_amount(self, id, amount_added):
     balance_model = self._get_balance(id)
@@ -34,12 +36,14 @@ class CustomerBalanceService:
     self.db.add(balance_model)
     self.db.commit()
 
+
   def get_all(self):
     entity_id = self.req_user.get("entity_id")
     balances_model = (
       self.db.query(CustomersBalance)
       .join(CustomersBalance.client)
       .join(CustomersBalance.currency)
+      .filter(Clients.enabled == True)
       .filter(Clients.entity_id == entity_id)
       .options(
         joinedload(CustomersBalance.client), 
@@ -48,12 +52,14 @@ class CustomerBalanceService:
       .all()
     )
     return balances_model
-  
+
+
   def get_all_movements(self, account_id: int):
     balance_model = (
       self.db.query(CustomersBalance)
       .join(CustomersBalance.client)
       .join(CustomersBalance.currency)
+      .filter(Clients.enabled == True)
       .filter(CustomersBalance.id == account_id)
       .options(
         joinedload(CustomersBalance.client), 
@@ -61,10 +67,8 @@ class CustomerBalanceService:
       )
       .first()
     )
-
     if balance_model is None:
       return {"status": "ok", "data": None}
-    
     # Movimientos de ingresos (TRX)
     trxs = (
       self.db.query(Trx)
@@ -72,14 +76,12 @@ class CustomerBalanceService:
       .filter(Trx.status == "conciliado")
       .all()
     )
-
     # Pagos hechos (EGRESOS)
     payments = (
       self.db.query(Payments)
       .filter(Payments.customer_balance_id == balance_model.id)
       .all()
     )
-
     # Combinar ambos en un solo resultado (opcional: los podés ordenar por fecha después)
     combined = []
     for trx in trxs:
@@ -89,7 +91,6 @@ class CustomerBalanceService:
         "date": trx.date,
         "status": trx.status,
       })
-
     for payment in payments:
       combined.append({
         "type": "Pago",
@@ -97,15 +98,14 @@ class CustomerBalanceService:
         "date": payment.date,
         "status": payment.status
       })
-
     # Ordenar por fecha descendente
     combined.sort(key=lambda x: str(x["date"]), reverse=True)
-
     return {"status": "ok", "data": {
       "balance": balance_model,
       "movements": combined[:10]
     }}
-  
+
+
   def create(
     self,
     customer_balance_request: CustomerBalanceCreateRequest

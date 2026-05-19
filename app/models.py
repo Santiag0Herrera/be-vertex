@@ -1,5 +1,5 @@
 from datetime import datetime
-from sqlalchemy import Column, DateTime, Integer, String, Float, ForeignKey
+from sqlalchemy import Column, DateTime, Integer, String, Float, ForeignKey, Boolean
 from sqlalchemy.orm import relationship, declarative_base
 
 Base = declarative_base()
@@ -16,6 +16,7 @@ class Users(Base):
     phone = Column(String)
     perm_id = Column(Integer, ForeignKey("permissions.id"))
     entity_id = Column(Integer, ForeignKey("entities.id"))
+    enabled = Column(Boolean, nullable=False, default=True)
 
     entity = relationship("Entity", back_populates="users")
     permission = relationship("Permission", back_populates="users")
@@ -163,6 +164,7 @@ class Clients(Base):
     phone = Column(String)
     perm_id = Column(Integer, ForeignKey("permissions.id"), nullable=False)
     entity_id = Column(Integer, ForeignKey("entities.id"), nullable=False)
+    enabled = Column(Boolean, nullable=False, default=True)
 
     entity = relationship("Entity", back_populates="clients")
     permission = relationship("Permission", back_populates="clients")

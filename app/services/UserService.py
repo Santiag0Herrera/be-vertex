@@ -19,7 +19,8 @@ class UserService():
       Gets all users from them same requesting users's entity.
       """
       users_model = self.db.query(Users).filter(
-        Users.entity_id == self.req_user.get('entity_id')
+        Users.entity_id == self.req_user.get('entity_id'),
+        Users.enabled == True
       ).all()
 
       self.error.raise_if_none(users_model)
@@ -43,7 +44,8 @@ class UserService():
     Gets the requesting user's info.
     """
     user_model = self.db.query(Users).filter(
-      Users.id == self.req_user.get('id')
+      Users.id == self.req_user.get('id'),
+      Users.enabled == True
     ).first()
     
     self.error.raise_if_none(user_model)
@@ -123,7 +125,8 @@ class UserService():
     if user_model.perm_id == clients_permission_model.id:
       self.error.raise_bad_request("The account is a client type.")
     
-    self.db.delete(user_model)
+    user_model.enabled = False
+    self.db.add(user_model)
     self.db.commit()
     return self.success.response(f"Usuario {user_model.first_name} {user_model.last_name} fue eliminado exitosamente.")
   

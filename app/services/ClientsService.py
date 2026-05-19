@@ -22,7 +22,7 @@ class ClientService():
   
 
   def get_all(self) -> List[ClientResponse]:
-    stmt = select(Clients).where(Clients.entity_id == self.req_user.get("entity_id"))
+    stmt = select(Clients).where(Clients.entity_id == self.req_user.get("entity_id")).where(Clients.enabled == True)
     clients_model = self.db.execute(stmt).scalars().all()
     return clients_model
 
@@ -61,6 +61,7 @@ class ClientService():
     self.db.commit()
     return self.success.response({'message': 'Cliente creado con exito!', 'generated_password': auto_generated_password})
   
+
   def delete(self, id_client: int):
     """
     Deletes client by client_id
@@ -70,14 +71,16 @@ class ClientService():
     if client_model is None:
       self.error.raise_not_found("Cliente")
     
-    self.db.delete(client_model)
+    client_model.enabled = False
+    self.db.add(client_model)
     self.db.commit()
     return self.success.response(f"Cliente {client_model.first_name} {client_model.last_name} fue eliminado exitosamente.")
     
   
   def get_current(self):
     client_model = self.db.query(Clients).filter(
-        Clients.id == self.req_user.get("id")
+        Clients.id == self.req_user.get("id"),
+        Clients.enabled == True
     ).first()
 
     if client_model is None:
