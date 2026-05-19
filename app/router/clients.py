@@ -25,17 +25,20 @@ async def get_all_clients(db: db_dependency, user: user_dependency):
   clients_model = db_service.client.get_all()
   return clients_model
 
+
 @router.post("/create", status_code=status.HTTP_201_CREATED)
 async def create_new_client(db: db_dependency, user: user_dependency, new_client_request: NewClientRequest):
   db_service = DBService(db=db, req_user=user)
   create_client_model = db_service.client.create(new_client_request)
   return create_client_model
 
+
 @router.delete("/delete", status_code=status.HTTP_200_OK)
 async def delete_client_by_id(db: db_dependency, user: user_dependency, client_id: int):
   db_service = DBService(db=db, req_user=user)
   delete_client_model = db_service.client.delete(client_id)
   return delete_client_model
+
 
 @router.get("/me", status_code=status.HTTP_200_OK)
 async def get_client_by_id(db: db_dependency, user: user_dependency):
