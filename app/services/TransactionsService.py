@@ -24,6 +24,7 @@ class TransactionsService:
     self.ib_service = InterBankingService()
     self.n8n_service = N8NService()
   
+
   async def _verify_bank_movement(
     self,
     account_number: str,
@@ -37,30 +38,64 @@ class TransactionsService:
     )
     return self.error.raise_if_none(movement_model, "Movment")
 
-  def get_all(self, day, month, year):
+
+  def get_all(self, day=None, month=None, year=None, page=0, recordsPerPage=10):
     user_model = self.db.query(Users).filter(
-      Users.id == self.req_user.get('id')
+        Users.id == self.req_user.get("id")
     ).first()
 
-    transactions_model = self.db.query(Trx).options(
-      joinedload(Trx.account).joinedload(CustomersBalance.currency)
+    page = max(int(page or 0), 0)
+    recordsPerPage = max(int(recordsPerPage or 10), 1)
+
+    offset = page * recordsPerPage
+
+    base_query = self.db.query(Trx).options(
+        joinedload(Trx.account).joinedload(CustomersBalance.currency)
     ).join(
-      CustomersBalance,
-      Trx.account_id == CustomersBalance.id
+        CustomersBalance,
+        Trx.account_id == CustomersBalance.id
     ).filter(
-      Trx.entity_id == user_model.entity_id,
-      extract('month', Trx.date) == month,
-      extract('year', Trx.date) == year,
-      extract('day', Trx.date) == day,
-    ).all()
-    
-    day_total_amount = sum(transaction.amount for transaction in transactions_model)
+        Trx.entity_id == user_model.entity_id,
+    )
+
+    if year:
+        base_query = base_query.filter(
+            extract("year", Trx.date) == year
+        )
+
+    if month:
+        base_query = base_query.filter(
+            extract("month", Trx.date) == month
+        )
+
+    if day:
+        base_query = base_query.filter(
+            extract("day", Trx.date) == day
+        )
+
+    total_records = base_query.count()
+
+    transactions_model = base_query.order_by(
+        Trx.date.desc(),
+        Trx.id.desc()
+    ).offset(offset).limit(recordsPerPage).all()
+
+    day_total_amount = sum(
+        transaction.amount for transaction in transactions_model
+    )
+
     result = {
-      "transactions": transactions_model,
-      "total_amount": day_total_amount
+        "transactions": transactions_model,
+        "total_amount": day_total_amount,
+        "page": page,
+        "recordsPerPage": recordsPerPage,
+        "totalRecords": total_records,
+        "totalPages": (total_records + recordsPerPage - 1) // recordsPerPage
     }
+
     return self.success.response(result)
-  
+    
+
   def create(self, document_request: DocumentRequest, user: dict):
     account_model = self.db.query(CustomersBalance).filter(
       CustomersBalance.id == document_request.account_id
