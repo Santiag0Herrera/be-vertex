@@ -1,3 +1,5 @@
+import datetime
+
 from sqlalchemy.orm import Session, joinedload
 from app.models import Trx, Users, CBU, Entity, CustomersBalance, EntityCBU
 from sqlalchemy import extract
@@ -40,60 +42,62 @@ class TransactionsService:
 
 
   def get_all(self, day=None, month=None, year=None, page=0, recordsPerPage=10):
-    user_model = self.db.query(Users).filter(
-        Users.id == self.req_user.get("id")
-    ).first()
+      user_model = self.db.query(Users).filter(
+          Users.id == self.req_user.get("id")
+      ).first()
 
-    page = max(int(page or 0), 0)
-    recordsPerPage = max(int(recordsPerPage or 10), 1)
+      page = max(int(page or 0), 0)
+      recordsPerPage = max(int(recordsPerPage or 10), 1)
 
-    offset = page * recordsPerPage
+      offset = page * recordsPerPage
 
-    base_query = self.db.query(Trx).options(
-        joinedload(Trx.account).joinedload(CustomersBalance.currency)
-    ).join(
-        CustomersBalance,
-        Trx.account_id == CustomersBalance.id
-    ).filter(
-        Trx.entity_id == user_model.entity_id,
-    )
+      total_records = self.db.query(Trx).filter(
+          Trx.entity_id == user_model.entity_id
+      ).count()
 
-    if year:
-        base_query = base_query.filter(
-            extract("year", Trx.date) == year
-        )
+      base_query = self.db.query(Trx).options(
+          joinedload(Trx.account).joinedload(CustomersBalance.currency)
+      ).join(
+          CustomersBalance,
+          Trx.account_id == CustomersBalance.id
+      ).filter(
+          Trx.entity_id == user_model.entity_id,
+      )
 
-    if month:
-        base_query = base_query.filter(
-            extract("month", Trx.date) == month
-        )
+      if year:
+          base_query = base_query.filter(
+              extract("year", Trx.date) == year
+          )
 
-    if day:
-        base_query = base_query.filter(
-            extract("day", Trx.date) == day
-        )
+      if month:
+          base_query = base_query.filter(
+              extract("month", Trx.date) == month
+          )
 
-    total_records = base_query.count()
+      if day:
+          base_query = base_query.filter(
+              extract("day", Trx.date) == day
+          )
 
-    transactions_model = base_query.order_by(
-        Trx.date.desc(),
-        Trx.id.desc()
-    ).offset(offset).limit(recordsPerPage).all()
+      transactions_model = base_query.order_by(
+          Trx.date.desc(),
+          Trx.id.desc()
+      ).offset(offset).limit(recordsPerPage).all()
 
-    day_total_amount = sum(
-        transaction.amount for transaction in transactions_model
-    )
+      day_total_amount = sum(
+          transaction.amount for transaction in transactions_model
+      )
 
-    result = {
-        "transactions": transactions_model,
-        "total_amount": day_total_amount,
-        "page": page,
-        "recordsPerPage": recordsPerPage,
-        "totalRecords": total_records,
-        "totalPages": (total_records + recordsPerPage - 1) // recordsPerPage
-    }
+      result = {
+          "transactions": transactions_model,
+          "total_amount": day_total_amount,
+          "page": page,
+          "recordsPerPage": recordsPerPage,
+          "totalRecords": total_records,
+          "totalPages": (total_records + recordsPerPage - 1) // recordsPerPage
+      }
 
-    return self.success.response(result)
+      return self.success.response(result)
     
 
   def create(self, document_request: DocumentRequest, user: dict):
@@ -127,6 +131,7 @@ class TransactionsService:
       entity_id=entity_model.id,
       amount=document_request.amount,
       date=document_request.date,
+      creation_date=datetime.utcnow(),
       trx_id=document_request.trx_id,
       account_id=document_request.account_id,
       status="pendiente"

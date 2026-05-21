@@ -95,6 +95,7 @@ class Trx(Base):
     client_id = Column(Integer, ForeignKey("clients.id"))
     amount = Column(Float, nullable=False)
     date = Column(DateTime, nullable=False)
+    creation_date = Column(DateTime, default=datetime.utcnow)
     status = Column(String, nullable=False)
     account_id = Column(Integer, ForeignKey("customers_balance.id"), nullable=False)
 
