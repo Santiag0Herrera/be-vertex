@@ -80,7 +80,7 @@ class TransactionsService:
           )
 
       transactions_model = base_query.order_by(
-          Trx.date.desc(),
+          Trx.creation_date.desc(),
           Trx.id.desc()
       ).offset(offset).limit(recordsPerPage).all()
 
