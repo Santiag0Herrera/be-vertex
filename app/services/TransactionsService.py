@@ -41,7 +41,7 @@ class TransactionsService:
     return self.error.raise_if_none(movement_model, "Movment")
 
 
-  def get_all(self, day=None, month=None, year=None, page=0, recordsPerPage=10):
+  def get_all(self, page=0, recordsPerPage=10, dateFrom=None, dateTo=None, status=None):
       user_model = self.db.query(Users).filter(
           Users.id == self.req_user.get("id")
       ).first()
@@ -63,20 +63,20 @@ class TransactionsService:
       ).filter(
           Trx.entity_id == user_model.entity_id,
       )
-
-      if year:
+        
+      if dateFrom:
           base_query = base_query.filter(
-              extract("year", Trx.date) == year
+              Trx.date >= dateFrom
           )
-
-      if month:
+      
+      if dateTo:
           base_query = base_query.filter(
-              extract("month", Trx.date) == month
+              Trx.date <= dateTo
           )
-
-      if day:
+      
+      if status:
           base_query = base_query.filter(
-              extract("day", Trx.date) == day
+              Trx.status == status
           )
 
       transactions_model = base_query.order_by(

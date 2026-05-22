@@ -21,14 +21,14 @@ user_dependency = Annotated[dict, Depends(get_current_user)]
 async def get_all_transactions(
     db: db_dependency,
     user: user_dependency,
-    day: int | None = None,
-    month: int | None = None,
-    year: int | None = None,
     page: int = Query(0, ge=0),
-    recordsPerPage: int = Query(10, gt=0)
+    recordsPerPage: int = Query(10, gt=0),
+    dateFrom: Optional[str] = Query(None),
+    dateTo: Optional[str] = Query(None),
+    status: Optional[str] = Query(None)
 ):
   db_service = DBService(db=db, req_user=user)
-  transactions_model = db_service.trx.get_all(day, month, year, page, recordsPerPage)
+  transactions_model = db_service.trx.get_all(page, recordsPerPage, dateFrom, dateTo, status)
   return transactions_model
 
 
