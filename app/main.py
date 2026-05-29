@@ -7,7 +7,12 @@ from dotenv import load_dotenv
 import os
 
 load_dotenv(dotenv_path="dev.env")  # Esto carga las variables al entorno
-app = FastAPI()
+ENV = os.getenv("ENVIRONMENT", "dev")
+app = FastAPI(
+    docs_url="/docs" if ENV == "dev" else None,
+    redoc_url="/redoc" if ENV == "dev" else None,
+    openapi_url="/openapi.json" if ENV == "dev" else None
+)
 
 app.add_middleware(PermissionMiddleware)
 app.add_middleware(
