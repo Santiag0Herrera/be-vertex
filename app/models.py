@@ -98,6 +98,8 @@ class Trx(Base):
     creation_date = Column(DateTime, default=datetime.utcnow)
     status = Column(String, nullable=False)
     account_id = Column(Integer, ForeignKey("customers_balance.id"), nullable=False)
+    applied_fee_percentage = Column(Float, nullable=True)
+    fee_amount = Column(Float, nullable=True)
 
     entity = relationship("Entity", back_populates="trxs")
     client = relationship("Clients", back_populates="trxs")
@@ -181,6 +183,7 @@ class CustomersBalance(Base):
     balance_amount = Column(Float, nullable=False, default=0.0)
     balance_currency_id = Column(Integer, ForeignKey("currency.id"), nullable=False)
     last_update = Column(DateTime, nullable=False, default=datetime.utcnow)
+    fee_percentage = Column(Float, nullable=False, default=0)
 
     client = relationship("Clients", back_populates="balance", lazy="joined")
     currency = relationship("Currency", back_populates="balances")

@@ -31,6 +31,7 @@ SELECT
   trx.status AS trx_status,
   customers_balance.id AS customer_balance_id,
   customers_balance.balance_amount AS customer_balance_amount,
+  customers_balance.fee_percentage AS fee_percentage,
   currency.name AS currency_name
 FROM trx
 LEFT JOIN customers_balance ON trx.account_id = customers_balance.id
@@ -102,21 +103,27 @@ def update_trx_status(
     new_status: str,
     customer_balance_id: int,
     trx_amount,
+    fee_percentage
 ):
     db = SessionLocal()
-
+    fee_amount = calculate_fee_amount(trx_amount, fee_percentage)
     try:
         result = db.execute(
-            text("""
-                UPDATE trx
-                SET status = :status
-                WHERE trx_id = :trx_id
-                  AND status = 'pendiente'
-            """),
-            {
-                "status": new_status,
-                "trx_id": trx_id,
-            },
+        text("""
+          UPDATE trx
+          SET 
+              status = :status,
+              applied_fee_percentage = :applied_fee_percentage,
+              fee_amount = :fee_amount
+          WHERE trx_id = :trx_id
+            AND status = 'pendiente'
+        """),
+        {
+            "status": new_status,
+            "trx_id": trx_id,
+            "applied_fee_percentage": fee_percentage or 0,
+            "fee_amount": fee_amount,
+        },
         )
 
         if result.rowcount == 0:
@@ -156,6 +163,12 @@ def update_trx_status(
         raise
     finally:
         db.close()
+
+
+def calculate_fee_amount(amount, fee_percentage):
+    amount = normalize_amount(amount)
+    fee_percentage = normalize_amount(fee_percentage or 0)
+    return (amount * fee_percentage / Decimal("100")).quantize(Decimal("0.01"))
 
 
 async def run() -> None:
@@ -269,18 +282,28 @@ async def run() -> None:
                         matched_movement.get("movement_date"),
                     )
 
+                    fee_percentage = trx.get("fee_percentage")
+
                     updated = update_trx_status(
                         trx_id=trx_id,
                         new_status="conciliado",
                         customer_balance_id=customer_balance_id,
                         trx_amount=trx_amount,
+                        fee_percentage=fee_percentage,
                     )
+
 
                     if updated:
                         updated_trx_count += 1
                         logger.info(
                             "[TRX UPDATED] trx_id=%s status=conciliado",
                             trx_id,
+                        )
+                        logger.info(
+                            "[FEE APPLIED] trx_id=%s fee_percentage=%s fee_amount=%s",
+                            trx_id,
+                            fee_percentage or 0,
+                            calculate_fee_amount(trx_amount, fee_percentage),
                         )
                     else:
                         skipped_trx_count += 1
