@@ -3,7 +3,11 @@ import datetime
 from sqlalchemy.orm import Session, joinedload
 from app.models import Trx, Users, CBU, Entity, CustomersBalance, EntityCBU
 from sqlalchemy import extract
-from app.schemas.transactions import DocumentRequest, MultipleDocumentRequest, UploadDocumentRequest
+from app.schemas.transactions import (
+    DocumentRequest,
+    MultipleDocumentRequest,
+    UploadDocumentRequest,
+)
 import uuid
 import hashlib
 
@@ -12,209 +16,208 @@ from .SuccessService import SuccessService
 from .InterBankingService import InterBankingService
 from .N8NService import N8NService
 
+
 class TransactionsService:
-  db: Session
-  req_user: dict
-  error: ErrorService
-  success: SuccessService
+    db: Session
+    req_user: dict
+    error: ErrorService
+    success: SuccessService
 
-  def __init__(self, db: Session, req_user: dict):
-    self.db = db
-    self.req_user = req_user
-    self.error = ErrorService()
-    self.success = SuccessService()
-    self.ib_service = InterBankingService()
-    self.n8n_service = N8NService()
-  
+    def __init__(self, db: Session, req_user: dict):
+        self.db = db
+        self.req_user = req_user
+        self.error = ErrorService()
+        self.success = SuccessService()
+        self.ib_service = InterBankingService()
+        self.n8n_service = N8NService()
 
-  async def _verify_bank_movement(
-    self,
-    account_number: str,
-    bank_number: str,
-    customer_id: str
-  ):
-    movement_model = self.ib_service.get_movement(
-      account_number=account_number,
-      bank_number=bank_number,
-      customer_id=customer_id
-    )
-    return self.error.raise_if_none(movement_model, "Movment")
-
-
-  def get_all(self, page=0, recordsPerPage=10, dateFrom=None, dateTo=None, status=None):
-      user_model = self.db.query(Users).filter(
-          Users.id == self.req_user.get("id")
-      ).first()
-
-      page = max(int(page or 0), 0)
-      recordsPerPage = max(int(recordsPerPage or 10), 1)
-
-      offset = page * recordsPerPage
-
-      total_records = self.db.query(Trx).filter(
-          Trx.entity_id == user_model.entity_id
-      ).count()
-
-      base_query = self.db.query(Trx).options(
-          joinedload(Trx.account).joinedload(CustomersBalance.currency)
-      ).join(
-          CustomersBalance,
-          Trx.account_id == CustomersBalance.id
-      ).filter(
-          Trx.entity_id == user_model.entity_id,
-      )
-        
-      if dateFrom:
-          base_query = base_query.filter(
-              Trx.date >= dateFrom
-          )
-      
-      if dateTo:
-          base_query = base_query.filter(
-              Trx.date <= dateTo
-          )
-      
-      if status:
-          base_query = base_query.filter(
-              Trx.status == status
-          )
-
-      transactions_model = base_query.order_by(
-          Trx.creation_date.desc(),
-          Trx.id.desc()
-      ).offset(offset).limit(recordsPerPage).all()
-
-      day_total_amount = sum(
-          transaction.amount for transaction in transactions_model
-      )
-
-      result = {
-          "transactions": transactions_model,
-          "total_amount": day_total_amount,
-          "page": page,
-          "recordsPerPage": recordsPerPage,
-          "totalRecords": total_records,
-          "totalPages": (total_records + recordsPerPage - 1) // recordsPerPage
-      }
-
-      return self.success.response(result)
-    
-
-  def create(self, document_request: DocumentRequest, user: dict):
-    account_model = self.db.query(CustomersBalance).filter(
-      CustomersBalance.id == document_request.account_id
-    )
-    self.error.raise_if_none(account_model, "Clinet Account")
-
-    cbu_model = self.db.query(CBU).filter(
-      CBU.cuit == document_request.receptor_cuit
-    ).first() 
-    self.error.raise_if_none(cbu_model)
-
-    trx_exists_model = self.db.query(Trx).filter(
-      Trx.trx_id == document_request.trx_id
-    ).first()
-    self.error.raise_if_none(trx_exists_model)
-
-    entity_model = self.db.query(Entity).join(
-      EntityCBU, Entity.id == EntityCBU.entity_id
-    ).filter(
-        EntityCBU.cbu_id == cbu_model.id
-    ).first()
-    self.error.raise_if_none(entity_model, f"Entity with cuit: {document_request.receptor_cuit}")
-    
-    create_user_model = Trx(
-      emisor_cbu=document_request.emisor_cbu,
-      emisor_name=document_request.emisor_name,
-      emisor_cuit=document_request.emisor_cuit,
-      receptor_cbu=cbu_model.nro,
-      entity_id=entity_model.id,
-      amount=document_request.amount,
-      date=document_request.date,
-      creation_date=datetime.utcnow(),
-      trx_id=document_request.trx_id,
-      account_id=document_request.account_id,
-      status="pendiente"
-    )
-    self.db.add(create_user_model)
-    self.db.commit()
-    return self.success.response("Transaction registered!")
-  
-
-  def create_multiple(self, multiple_trx_request: MultipleDocumentRequest):
-    account_model = self.db.query(CustomersBalance).filter(
-        CustomersBalance.id == multiple_trx_request.account_id
-    ).first()
-    self.error.raise_if_none(account_model, "Client Account")
-    entity_model = self.db.query(Entity).filter(
-        Entity.id == self.req_user.get("entity_id")
-    ).first()
-    self.error.raise_if_none(entity_model, "Entity")
-    receptor_account_number = multiple_trx_request.owner_account_number
-    if not receptor_account_number:
-        self.error.raise_bad_request("Owner account number is required")
-    new_trx = []
-    already_created = []
-    used_fingerprints = set()
-    for doc in multiple_trx_request.transactions:
-        trx_datetime = doc.date.isoformat()
-        stable_key = (
-            f"{multiple_trx_request.account_id}|"
-            f"{receptor_account_number}|"
-            f"{doc.amount}|"
-            f"{trx_datetime}"
+    async def _verify_bank_movement(
+        self, account_number: str, bank_number: str, customer_id: str
+    ):
+        movement_model = self.ib_service.get_movement(
+            account_number=account_number,
+            bank_number=bank_number,
+            customer_id=customer_id,
         )
-        document_fingerprint = hashlib.sha1(
-            stable_key.encode("utf-8")
-        ).hexdigest()
-        if document_fingerprint in used_fingerprints:
-            already_created.append({
-                "amount": doc.amount,
-                "date": doc.date,
-                "reason": "Duplicate in current request"
-            })
-            continue
-        used_fingerprints.add(document_fingerprint)
-        existing_trx = self.db.query(Trx).filter(
-            Trx.document_fingerprint == document_fingerprint
-        ).first()
-        if existing_trx:
-            already_created.append({
-                "trx_id": existing_trx.trx_id,
-                "amount": doc.amount,
-                "date": doc.date,
-                "reason": "Already exists in database"
-            })
-            continue
-        emisor_name = doc.emisor_name or entity_model.name
-        emisor_cuit = '-'
-        emisor_cbu = doc.emisor_cbu or receptor_account_number
-        trx_model = Trx(
-            emisor_cbu=emisor_cbu,
-            emisor_name=emisor_name,
-            emisor_cuit=emisor_cuit,
-            receptor_cbu=receptor_account_number,
+        return self.error.raise_if_none(movement_model, "Movment")
+
+    def get_all(
+        self, page=0, recordsPerPage=10, dateFrom=None, dateTo=None, status=None
+    ):
+        user_model = (
+            self.db.query(Users).filter(Users.id == self.req_user.get("id")).first()
+        )
+
+        page = max(int(page or 0), 0)
+        recordsPerPage = max(int(recordsPerPage or 10), 1)
+
+        offset = page * recordsPerPage
+
+        base_query = (
+            self.db.query(Trx)
+            .options(joinedload(Trx.account).joinedload(CustomersBalance.currency))
+            .join(CustomersBalance, Trx.account_id == CustomersBalance.id)
+            .filter(
+                Trx.entity_id == user_model.entity_id,
+            )
+        )
+
+        if dateFrom:
+            base_query = base_query.filter(Trx.date >= dateFrom)
+
+        if dateTo:
+            base_query = base_query.filter(Trx.date <= dateTo)
+
+        if status:
+            base_query = base_query.filter(Trx.status == status)
+
+        total_records = base_query.count()
+
+        transactions_model = (
+            base_query.order_by(Trx.creation_date.desc(), Trx.id.desc())
+            .offset(offset)
+            .limit(recordsPerPage)
+            .all()
+        )
+
+        day_total_amount = sum(transaction.amount for transaction in transactions_model)
+
+        result = {
+            "transactions": transactions_model,
+            "total_amount": day_total_amount,
+            "page": page,
+            "recordsPerPage": recordsPerPage,
+            "totalRecords": total_records,
+            "totalPages": (total_records + recordsPerPage - 1) // recordsPerPage,
+        }
+
+        return self.success.response(result)
+
+    def create(self, document_request: DocumentRequest, user: dict):
+        account_model = self.db.query(CustomersBalance).filter(
+            CustomersBalance.id == document_request.account_id
+        )
+        self.error.raise_if_none(account_model, "Clinet Account")
+
+        cbu_model = (
+            self.db.query(CBU)
+            .filter(CBU.cuit == document_request.receptor_cuit)
+            .first()
+        )
+        self.error.raise_if_none(cbu_model)
+
+        trx_exists_model = (
+            self.db.query(Trx).filter(Trx.trx_id == document_request.trx_id).first()
+        )
+        self.error.raise_if_none(trx_exists_model)
+
+        entity_model = (
+            self.db.query(Entity)
+            .join(EntityCBU, Entity.id == EntityCBU.entity_id)
+            .filter(EntityCBU.cbu_id == cbu_model.id)
+            .first()
+        )
+        self.error.raise_if_none(
+            entity_model, f"Entity with cuit: {document_request.receptor_cuit}"
+        )
+
+        create_user_model = Trx(
+            emisor_cbu=document_request.emisor_cbu,
+            emisor_name=document_request.emisor_name,
+            emisor_cuit=document_request.emisor_cuit,
+            receptor_cbu=cbu_model.nro,
             entity_id=entity_model.id,
-            amount=doc.amount,
-            date=doc.date,
-            trx_id=f"AUTO-{uuid.uuid4().hex[:16].upper()}",
-            document_fingerprint=document_fingerprint,
-            account_id=multiple_trx_request.account_id,
-            status="pendiente"
+            amount=document_request.amount,
+            date=document_request.date,
+            creation_date=datetime.utcnow(),
+            trx_id=document_request.trx_id,
+            account_id=document_request.account_id,
+            status="pendiente",
         )
-        new_trx.append(trx_model)
-        self.db.add(trx_model)
+        self.db.add(create_user_model)
+        self.db.commit()
+        return self.success.response("Transaction registered!")
 
-    if len(already_created) == len(multiple_trx_request.transactions):
-        self.error.raise_conflict("All transactions already exist")
-    self.db.commit()
-    return self.success.response({
-        "created": len(new_trx),
-        "duplicates": already_created
-    })
+    def create_multiple(self, multiple_trx_request: MultipleDocumentRequest):
+        account_model = (
+            self.db.query(CustomersBalance)
+            .filter(CustomersBalance.id == multiple_trx_request.account_id)
+            .first()
+        )
+        self.error.raise_if_none(account_model, "Client Account")
+        entity_model = (
+            self.db.query(Entity)
+            .filter(Entity.id == self.req_user.get("entity_id"))
+            .first()
+        )
+        self.error.raise_if_none(entity_model, "Entity")
+        receptor_account_number = multiple_trx_request.owner_account_number
+        if not receptor_account_number:
+            self.error.raise_bad_request("Owner account number is required")
+        new_trx = []
+        already_created = []
+        used_fingerprints = set()
+        for doc in multiple_trx_request.transactions:
+            trx_datetime = doc.date.isoformat()
+            stable_key = (
+                f"{multiple_trx_request.account_id}|"
+                f"{receptor_account_number}|"
+                f"{doc.amount}|"
+                f"{trx_datetime}"
+            )
+            document_fingerprint = hashlib.sha1(stable_key.encode("utf-8")).hexdigest()
+            if document_fingerprint in used_fingerprints:
+                already_created.append(
+                    {
+                        "amount": doc.amount,
+                        "date": doc.date,
+                        "reason": "Duplicate in current request",
+                    }
+                )
+                continue
+            used_fingerprints.add(document_fingerprint)
+            existing_trx = (
+                self.db.query(Trx)
+                .filter(Trx.document_fingerprint == document_fingerprint)
+                .first()
+            )
+            if existing_trx:
+                already_created.append(
+                    {
+                        "trx_id": existing_trx.trx_id,
+                        "amount": doc.amount,
+                        "date": doc.date,
+                        "reason": "Already exists in database",
+                    }
+                )
+                continue
+            emisor_name = doc.emisor_name or entity_model.name
+            emisor_cuit = "-"
+            emisor_cbu = doc.emisor_cbu or receptor_account_number
+            trx_model = Trx(
+                emisor_cbu=emisor_cbu,
+                emisor_name=emisor_name,
+                emisor_cuit=emisor_cuit,
+                receptor_cbu=receptor_account_number,
+                entity_id=entity_model.id,
+                amount=doc.amount,
+                date=doc.date,
+                trx_id=f"AUTO-{uuid.uuid4().hex[:16].upper()}",
+                document_fingerprint=document_fingerprint,
+                account_id=multiple_trx_request.account_id,
+                status="pendiente",
+            )
+            new_trx.append(trx_model)
+            self.db.add(trx_model)
 
+        if len(already_created) == len(multiple_trx_request.transactions):
+            self.error.raise_conflict("All transactions already exist")
+        self.db.commit()
+        return self.success.response(
+            {"created": len(new_trx), "duplicates": already_created}
+        )
 
-  async def upload_file(self, upload_document_request: UploadDocumentRequest):
-    response = await self.n8n_service.ai_extract_info(upload_document_request)
-    self.error.raise_if_none(response, "Document info")
-    return response
+    async def upload_file(self, upload_document_request: UploadDocumentRequest):
+        response = await self.n8n_service.ai_extract_info(upload_document_request)
+        self.error.raise_if_none(response, "Document info")
+        return response
