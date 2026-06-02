@@ -1,8 +1,8 @@
 import datetime
 
 from sqlalchemy.orm import Session, joinedload
-from app.models import Trx, Users, CBU, Entity, CustomersBalance, EntityCBU
-from sqlalchemy import extract
+from app.models import Trx, Users, CBU, Entity, CustomersBalance, EntityCBU, Clients
+from sqlalchemy import cast, or_, String
 from app.schemas.transactions import (
     DocumentRequest,
     MultipleDocumentRequest,
@@ -48,6 +48,8 @@ class TransactionsService:
         dateFrom=None,
         dateTo=None,
         status=None,
+        account=None,
+        client=None,
         account_id=None,
         client_id=None,
     ):
@@ -64,6 +66,7 @@ class TransactionsService:
             self.db.query(Trx)
             .options(joinedload(Trx.account).joinedload(CustomersBalance.currency))
             .join(CustomersBalance, Trx.account_id == CustomersBalance.id)
+            .join(Clients, CustomersBalance.client_id == Clients.id)
             .filter(
                 Trx.entity_id == user_model.entity_id,
             )
@@ -76,7 +79,28 @@ class TransactionsService:
             base_query = base_query.filter(Trx.date <= dateTo)
 
         if status:
-            base_query = base_query.filter(Trx.status == status)
+            base_query = base_query.filter(Trx.status.ilike(f"%{status.strip()}%"))
+
+        if account:
+            account_value = f"%{account.strip()}%"
+            base_query = base_query.filter(
+                or_(
+                    cast(CustomersBalance.id, String).ilike(account_value),
+                    cast(Trx.account_id, String).ilike(account_value),
+                    Trx.emisor_cbu.ilike(account_value),
+                    Trx.receptor_cbu.ilike(account_value),
+                )
+            )
+
+        if client:
+            client_value = f"%{client.strip()}%"
+            base_query = base_query.filter(
+                or_(
+                    Clients.first_name.ilike(client_value),
+                    Clients.last_name.ilike(client_value),
+                    Clients.email.ilike(client_value),
+                )
+            )
 
         if account_id:
             base_query = base_query.filter(Trx.account_id == account_id)

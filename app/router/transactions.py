@@ -26,6 +26,8 @@ async def get_all_transactions(
     dateFrom: Optional[str] = Query(None),
     dateTo: Optional[str] = Query(None),
     status: Optional[str] = Query(None),
+    account: Optional[str] = Query(None),
+    client: Optional[str] = Query(None),
     account_id: Optional[int] = Query(None),
     client_id: Optional[int] = Query(None)
 ):
@@ -36,6 +38,8 @@ async def get_all_transactions(
       dateFrom,
       dateTo,
       status,
+      account,
+      client,
       account_id,
       client_id,
   )
