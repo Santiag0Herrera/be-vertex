@@ -42,7 +42,14 @@ class TransactionsService:
         return self.error.raise_if_none(movement_model, "Movment")
 
     def get_all(
-        self, page=0, recordsPerPage=10, dateFrom=None, dateTo=None, status=None
+        self,
+        page=0,
+        recordsPerPage=10,
+        dateFrom=None,
+        dateTo=None,
+        status=None,
+        account_id=None,
+        client_id=None,
     ):
         user_model = (
             self.db.query(Users).filter(Users.id == self.req_user.get("id")).first()
@@ -70,6 +77,12 @@ class TransactionsService:
 
         if status:
             base_query = base_query.filter(Trx.status == status)
+
+        if account_id:
+            base_query = base_query.filter(Trx.account_id == account_id)
+
+        if client_id:
+            base_query = base_query.filter(CustomersBalance.client_id == client_id)
 
         total_records = base_query.count()
 
