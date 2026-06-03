@@ -88,15 +88,16 @@ class PermissionMiddleware(BaseHTTPMiddleware):
 
 def _save_log(endpoint: str, method: str, user: str):
     db = SessionLocal()
-    try:
-        log = Logs(
-            datetime=datetime.utcnow().isoformat(),
-            endpoint=endpoint,
-            method=method,
-            username=user
-        )
-        db.add(log)
-        db.commit()
-    except Exception as e:
-        # No bloqueamos la request por un error de logging
-        logging.error(f"⚠️ Failed to write log: {e}")
+    if not endpoint.startswith("/logs"):  # Evitar loguear las propias llamadas al endpoint de logs
+      try:
+          log = Logs(
+              datetime=datetime.utcnow().isoformat(),
+              endpoint=endpoint,
+              method=method,
+              username=user
+          )
+          db.add(log)
+          db.commit()
+      except Exception as e:
+          # No bloqueamos la request por un error de logging
+          logging.error(f"⚠️ Failed to write log: {e}")

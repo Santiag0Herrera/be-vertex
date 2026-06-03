@@ -20,7 +20,8 @@ class UserService():
       """
       users_model = self.db.query(Users).filter(
         Users.entity_id == self.req_user.get('entity_id'),
-        Users.enabled == True
+        Users.enabled == True,
+        Users.perm_id != 4 # Exclude super admin users
       ).all()
 
       self.error.raise_if_none(users_model)

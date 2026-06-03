@@ -1,7 +1,20 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.db.database import create_tables
-from app.router import auth, transactions, users, entities, products, clients, payments, balance, currency, extractor, textract
+from app.router import (
+    auth,
+    transactions,
+    users,
+    entities,
+    products,
+    clients,
+    payments,
+    balance,
+    currency,
+    extractor,
+    textract,
+    logs,
+)
 from app.middlewares.PermissionMiddleware import PermissionMiddleware
 from dotenv import load_dotenv
 import os
@@ -11,7 +24,7 @@ ENV = os.getenv("ENVIRONMENT", "dev")
 app = FastAPI(
     docs_url="/docs" if ENV == "dev" else None,
     redoc_url="/redoc" if ENV == "dev" else None,
-    openapi_url="/openapi.json" if ENV == "dev" else None
+    openapi_url="/openapi.json" if ENV == "dev" else None,
 )
 
 app.add_middleware(PermissionMiddleware)
@@ -35,3 +48,4 @@ app.include_router(balance.router)
 app.include_router(currency.router)
 app.include_router(extractor.router)
 app.include_router(textract.router)
+app.include_router(logs.router)
