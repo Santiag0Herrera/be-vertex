@@ -31,6 +31,43 @@ class TransactionsService:
         self.ib_service = InterBankingService()
         self.n8n_service = N8NService()
 
+    def _parse_date_filter(self, value, end_of_day=False):
+        if not value:
+            return None
+
+        if isinstance(value, datetime.datetime):
+            return value
+
+        if isinstance(value, datetime.date):
+            boundary_time = datetime.time.max if end_of_day else datetime.time.min
+            return datetime.datetime.combine(value, boundary_time)
+
+        if isinstance(value, str):
+            raw_value = value.strip()
+            is_date_only = len(raw_value) == 10 and raw_value.count("-") == 2
+
+            try:
+                parsed_value = datetime.datetime.fromisoformat(
+                    raw_value.replace("Z", "+00:00")
+                )
+            except ValueError:
+                self.error.raise_bad_request(
+                    "Invalid date format. Use YYYY-MM-DD or ISO datetime."
+                )
+
+            if parsed_value.tzinfo is not None:
+                parsed_value = parsed_value.replace(tzinfo=None)
+
+            if is_date_only:
+                boundary_time = datetime.time.max if end_of_day else datetime.time.min
+                parsed_value = datetime.datetime.combine(
+                    parsed_value.date(), boundary_time
+                )
+
+            return parsed_value
+
+        self.error.raise_bad_request("Invalid date value.")
+
     async def _verify_bank_movement(
         self, account_number: str, bank_number: str, customer_id: str
     ):
@@ -258,3 +295,50 @@ class TransactionsService:
         response = await self.n8n_service.ai_extract_info(upload_document_request)
         self.error.raise_if_none(response, "Document info")
         return response
+
+    def get_all_by_client_id(
+        self,
+        page=0,
+        recordsPerPage=10,
+        dateFrom=None,
+        dateTo=None,
+        status=None,
+    ):
+
+        page = max(int(page or 0), 0)
+        recordsPerPage = max(int(recordsPerPage or 10), 1)
+        offset = page * recordsPerPage
+        date_from_filter = self._parse_date_filter(dateFrom)
+        date_to_filter = self._parse_date_filter(dateTo, end_of_day=True)
+
+        base_query = (
+            self.db.query(Trx)
+            .options(joinedload(Trx.account).joinedload(CustomersBalance.currency))
+            .join(CustomersBalance, Trx.account_id == CustomersBalance.id)
+            .filter(CustomersBalance.client_id == self.req_user.get("id"))
+        )
+
+        if date_from_filter:
+            base_query = base_query.filter(Trx.date >= date_from_filter)
+        if date_to_filter:
+            base_query = base_query.filter(Trx.date <= date_to_filter)
+        if status:
+            base_query = base_query.filter(Trx.status.ilike(f"%{status.strip()}%"))
+
+        total_records = base_query.count()
+        transactions_model = (
+            base_query.order_by(Trx.creation_date.desc(), Trx.id.desc())
+            .offset(offset)
+            .limit(recordsPerPage)
+            .all()
+        )
+        day_total_amount = sum(transaction.amount for transaction in transactions_model)
+        result = {
+            "transactions": transactions_model,
+            "total_amount": day_total_amount,
+            "page": page,
+            "recordsPerPage": recordsPerPage,
+            "totalRecords": total_records,
+            "totalPages": (total_records + recordsPerPage - 1) // recordsPerPage,
+        }
+        return self.success.response(result)
