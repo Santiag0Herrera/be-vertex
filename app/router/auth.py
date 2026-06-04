@@ -57,7 +57,7 @@ async def get_login_token(form_data: OAuth2PasswordRequestForm = Depends(), db: 
       perm_id=user_permission.id,
       hierarchy=user_permission.hierarchy,
       entity_id=user.entity_id,
-      expires_delta=timedelta(minutes=20),
+      expires_delta=timedelta(hours=8),
       db=db
   )
   return {'access_token': token, 'token_type': 'Bearer', 'user_level': user_permission.level}
