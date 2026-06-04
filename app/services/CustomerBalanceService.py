@@ -118,8 +118,17 @@ class CustomerBalanceService:
     create_customer_balance = CustomersBalance(
       client_id=client_model.id,
       balance_amount=0,
-      balance_currency_id=customer_balance_request.balance_currency_id
+      balance_currency_id=customer_balance_request.balance_currency_id,
+      fee_percentage=customer_balance_request.fee_percentage
     )
     self.db.add(create_customer_balance)
     self.db.commit()
     return {'status': 'ok', 'result': "Balance creado correctamente."}
+  
+
+  def update_fee_percentage(self, balance_id: int, new_fee_percentage: float):
+    balance_model = self._get_balance(balance_id)
+    balance_model.fee_percentage = new_fee_percentage
+    self.db.add(balance_model)
+    self.db.commit()
+    return {'status': 'ok', 'result': "Porcentaje de fee actualizado correctamente."}

@@ -40,3 +40,17 @@ async def create_new_balance_account(
     customer_balance_request=customer_balance_request
   )
   return new_balance_request
+
+@router.put("/update-fee")
+async def update_fee_percentage(
+  db: db_dependency, 
+  user: user_dependency,
+  balance_id: int,
+  new_fee_percentage: float
+):
+  db_service = DBService(db=db, req_user=user)
+  update_fee_response = db_service.balance.update_fee_percentage(
+    balance_id=balance_id,
+    new_fee_percentage=new_fee_percentage
+  )
+  return update_fee_response
