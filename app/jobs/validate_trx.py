@@ -2,6 +2,7 @@
 
 import asyncio
 import datetime
+import hashlib
 import logging
 from decimal import Decimal
 
@@ -44,6 +45,10 @@ def normalize_account(value):
     return str(value or "").replace(" ", "").replace("-", "").strip()
 
 
+def normalize_fingerprint_value(value):
+    return str(value or "").strip().upper()
+
+
 def get_bank_name_from_cbu(cbu: str) -> str:
     bank_code = cbu[:3]
     return codes.get(bank_code, "Banco desconocido")
@@ -65,9 +70,68 @@ def normalize_amount(value):
     return Decimal(str(value)).quantize(Decimal("0.01"))
 
 
-def match_trx_with_ib(trx, ib_movements):
+def normalize_movement_date(value):
+    if not value:
+        return ""
+    return datetime.datetime.fromisoformat(str(value).replace("Z", "+00:00")).date().isoformat()
+
+
+def build_interbanking_fingerprint(movement, bank_number, account_number):
+    stable_key = "|".join(
+        [
+            normalize_fingerprint_value(bank_number),
+            normalize_fingerprint_value(account_number),
+            normalize_fingerprint_value(movement.get("voucher_number")),
+            normalize_fingerprint_value(movement.get("correlative_number")),
+            normalize_fingerprint_value(movement.get("operation_code_bank")),
+            normalize_fingerprint_value(movement.get("operation_code_ib")),
+            normalize_fingerprint_value(movement.get("branch_office_activity")),
+            normalize_fingerprint_value(movement.get("debit_credit_type")),
+            normalize_movement_date(movement.get("movement_date")),
+            str(normalize_amount(movement.get("amount"))),
+            normalize_fingerprint_value(movement.get("customer_cuit")),
+            normalize_account(movement.get("account_cbu")),
+        ]
+    )
+    return hashlib.sha256(stable_key.encode("utf-8")).hexdigest()
+
+
+def find_trx_by_fingerprint(document_fingerprint, current_trx_id):
+    db = SessionLocal()
+    try:
+        return (
+            db.execute(
+                text(
+                    """
+                    SELECT trx_id, status
+                    FROM trx
+                    WHERE document_fingerprint = :document_fingerprint
+                      AND trx_id != :current_trx_id
+                    LIMIT 1
+                    """
+                ),
+                {
+                    "document_fingerprint": document_fingerprint,
+                    "current_trx_id": current_trx_id,
+                },
+            )
+            .mappings()
+            .first()
+        )
+    except Exception:
+        logger.exception(
+            "[ERROR] failed_to_find_fingerprint document_fingerprint=%s",
+            document_fingerprint,
+        )
+        raise
+    finally:
+        db.close()
+
+
+def match_trx_with_ib(trx, ib_movements, bank_number, account_number):
     trx_amount = normalize_amount(trx["trx_amount"])
     trx_date = trx["trx_date"].date()
+    duplicated_match = None
 
     for mov in ib_movements:
         mov_amount = normalize_amount(mov.get("amount"))
@@ -93,7 +157,38 @@ def match_trx_with_ib(trx, ib_movements):
             )
 
         if amount_matches and date_matches and type_matches:
-            return mov
+            document_fingerprint = build_interbanking_fingerprint(
+                mov,
+                bank_number=bank_number,
+                account_number=account_number,
+            )
+            duplicated_trx = find_trx_by_fingerprint(
+                document_fingerprint=document_fingerprint,
+                current_trx_id=trx["trx_id"],
+            )
+            matched_result = {
+                "movement": mov,
+                "document_fingerprint": document_fingerprint,
+                "duplicated_trx": duplicated_trx,
+            }
+
+            if duplicated_trx:
+                logger.info(
+                    "[IB MATCH USED] trx_id=%s duplicate_of=%s fingerprint=%s voucher_number=%s customer_cuit=%s",
+                    trx["trx_id"],
+                    duplicated_trx.get("trx_id"),
+                    document_fingerprint,
+                    mov.get("voucher_number"),
+                    mov.get("customer_cuit"),
+                )
+                if duplicated_match is None:
+                    duplicated_match = matched_result
+                continue
+
+            return matched_result
+
+    if duplicated_match:
+        return duplicated_match
 
     return None
 
@@ -103,7 +198,8 @@ def update_trx_status(
     new_status: str,
     customer_balance_id: int,
     trx_amount,
-    fee_percentage
+    fee_percentage,
+    document_fingerprint=None,
 ):
     db = SessionLocal()
     fee_amount = calculate_fee_amount(trx_amount, fee_percentage)
@@ -113,6 +209,7 @@ def update_trx_status(
           UPDATE trx
           SET 
               status = :status,
+              document_fingerprint = :document_fingerprint,
               applied_fee_percentage = :applied_fee_percentage,
               fee_amount = :fee_amount
           WHERE trx_id = :trx_id
@@ -121,6 +218,7 @@ def update_trx_status(
         {
             "status": new_status,
             "trx_id": trx_id,
+            "document_fingerprint": document_fingerprint,
             "applied_fee_percentage": fee_percentage or 0,
             "fee_amount": fee_amount,
         },
@@ -165,6 +263,47 @@ def update_trx_status(
         db.close()
 
 
+def mark_trx_as_repeated(trx_id: str, document_fingerprint: str):
+    db = SessionLocal()
+    try:
+        result = db.execute(
+            text(
+                """
+                UPDATE trx
+                SET
+                    status = 'repetido',
+                    document_fingerprint = :document_fingerprint,
+                    applied_fee_percentage = 0,
+                    fee_amount = 0
+                WHERE trx_id = :trx_id
+                  AND status = 'pendiente'
+                """
+            ),
+            {
+                "trx_id": trx_id,
+                "document_fingerprint": document_fingerprint,
+            },
+        )
+
+        if result.rowcount == 0:
+            db.rollback()
+            logger.warning(
+                "[WARNING] repeated_trx_not_updated trx_id=%s reason=not_found_or_not_pending",
+                trx_id,
+            )
+            return False
+
+        db.commit()
+        return True
+
+    except Exception:
+        db.rollback()
+        logger.exception("[ERROR] failed_to_mark_repeated trx_id=%s", trx_id)
+        raise
+    finally:
+        db.close()
+
+
 def calculate_fee_amount(amount, fee_percentage):
     amount = normalize_amount(amount)
     fee_percentage = normalize_amount(fee_percentage or 0)
@@ -198,6 +337,7 @@ async def run() -> None:
         return
 
     updated_trx_count = 0
+    repeated_trx_count = 0
     checked_trx_count = 0
     skipped_trx_count = 0
 
@@ -253,6 +393,7 @@ async def run() -> None:
             trx_date_until = (trx_date + datetime.timedelta(days=1)).isoformat()
 
             try:
+                # buscar movimientos en interbanking con ese rango de fecha, monto y tipo de movimiento (credito/debito)
                 ib_movements_result = await ib_service.get_movement(
                     account_number=account_number,
                     bank_number=bank_number,
@@ -270,17 +411,49 @@ async def run() -> None:
                     trx_date_until,
                 )
 
-                matched_movement = match_trx_with_ib(trx, movements)
+                matched_result = match_trx_with_ib(
+                    trx,
+                    movements,
+                    bank_number=bank_number,
+                    account_number=account_number,
+                )
 
-                if matched_movement:
+                if matched_result:
+                    matched_movement = matched_result["movement"]
+                    document_fingerprint = matched_result["document_fingerprint"]
+                    duplicated_trx = matched_result["duplicated_trx"]
+
                     logger.info(
-                        "[MATCH] trx_id=%s trx_amount=%s ib_amount=%s trx_date=%s ib_date=%s",
+                        "[MATCH] trx_id=%s trx_amount=%s ib_amount=%s trx_date=%s ib_date=%s fingerprint=%s",
                         trx_id,
                         trx_amount,
                         matched_movement.get("amount"),
                         trx_date,
                         matched_movement.get("movement_date"),
+                        document_fingerprint,
                     )
+
+                    if duplicated_trx:
+                        updated = mark_trx_as_repeated(
+                            trx_id=trx_id,
+                            document_fingerprint=document_fingerprint,
+                        )
+
+                        if updated:
+                            repeated_trx_count += 1
+                            logger.warning(
+                                "[TRX UPDATED] trx_id=%s status=repetida duplicate_of=%s duplicate_status=%s",
+                                trx_id,
+                                duplicated_trx.get("trx_id"),
+                                duplicated_trx.get("status"),
+                            )
+                        else:
+                            skipped_trx_count += 1
+                            logger.warning(
+                                "[WARNING] repeated_update_skipped trx_id=%s",
+                                trx_id,
+                            )
+                        continue
 
                     fee_percentage = trx.get("fee_percentage")
 
@@ -290,6 +463,7 @@ async def run() -> None:
                         customer_balance_id=customer_balance_id,
                         trx_amount=trx_amount,
                         fee_percentage=fee_percentage,
+                        document_fingerprint=document_fingerprint,
                     )
 
 
@@ -332,11 +506,12 @@ async def run() -> None:
     duration = (finished_at - started_at).total_seconds()
 
     logger.info(
-        "[JOB END] validate_trx checked=%s conciliated=%s skipped=%s still_pending=%s duration_seconds=%.2f",
+        "[JOB END] validate_trx checked=%s conciliated=%s repeated=%s skipped=%s still_pending=%s duration_seconds=%.2f",
         checked_trx_count,
         updated_trx_count,
+        repeated_trx_count,
         skipped_trx_count,
-        len(pending_transactions) - updated_trx_count,
+        len(pending_transactions) - updated_trx_count - repeated_trx_count,
         duration,
     )
 

@@ -9,7 +9,6 @@ from app.schemas.transactions import (
     UploadDocumentRequest,
 )
 import uuid
-import hashlib
 
 from .ErrorService import ErrorService
 from .SuccessService import SuccessService
@@ -229,42 +228,7 @@ class TransactionsService:
         if not receptor_account_number:
             self.error.raise_bad_request("Owner account number is required")
         new_trx = []
-        already_created = []
-        used_fingerprints = set()
         for doc in multiple_trx_request.transactions:
-            trx_datetime = doc.date.isoformat()
-            stable_key = (
-                f"{multiple_trx_request.account_id}|"
-                f"{receptor_account_number}|"
-                f"{doc.amount}|"
-                f"{trx_datetime}"
-            )
-            document_fingerprint = hashlib.sha1(stable_key.encode("utf-8")).hexdigest()
-            if document_fingerprint in used_fingerprints:
-                already_created.append(
-                    {
-                        "amount": doc.amount,
-                        "date": doc.date,
-                        "reason": "Duplicate in current request",
-                    }
-                )
-                continue
-            used_fingerprints.add(document_fingerprint)
-            existing_trx = (
-                self.db.query(Trx)
-                .filter(Trx.document_fingerprint == document_fingerprint)
-                .first()
-            )
-            if existing_trx:
-                already_created.append(
-                    {
-                        "trx_id": existing_trx.trx_id,
-                        "amount": doc.amount,
-                        "date": doc.date,
-                        "reason": "Already exists in database",
-                    }
-                )
-                continue
             emisor_name = doc.emisor_name or entity_model.name
             emisor_cuit = "-"
             emisor_cbu = doc.emisor_cbu or receptor_account_number
@@ -277,18 +241,15 @@ class TransactionsService:
                 amount=doc.amount,
                 date=doc.date,
                 trx_id=f"AUTO-{uuid.uuid4().hex[:16].upper()}",
-                document_fingerprint=document_fingerprint,
                 account_id=multiple_trx_request.account_id,
                 status="pendiente",
             )
             new_trx.append(trx_model)
             self.db.add(trx_model)
 
-        if len(already_created) == len(multiple_trx_request.transactions):
-            self.error.raise_conflict("All transactions already exist")
         self.db.commit()
         return self.success.response(
-            {"created": len(new_trx), "duplicates": already_created}
+            {"created": len(new_trx), "duplicates": []}
         )
 
     async def upload_file(self, upload_document_request: UploadDocumentRequest):
