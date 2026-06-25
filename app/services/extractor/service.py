@@ -1,9 +1,22 @@
 from __future__ import annotations
 
-from botocore.exceptions import BotoCoreError, ClientError
+import logging
+from time import perf_counter
+
+from botocore.exceptions import (
+    BotoCoreError,
+    ClientError,
+    ConnectTimeoutError,
+    EndpointConnectionError,
+    ReadTimeoutError,
+)
 from fastapi import HTTPException, UploadFile
 
-from app.services.extractor.aws_client import analyze_document_bytes
+from app.services.extractor.aws_client import (
+    TRANSIENT_TEXTRACT_ERROR_CODES,
+    analyze_document_bytes,
+    get_client_error_code,
+)
 from app.services.extractor.builder import build_document_response
 from app.services.extractor.extractors import (
     extract_fields_from_wallet_lines,
@@ -24,46 +37,85 @@ ALLOWED_CONTENT_TYPES = {
 }
 
 MAX_SYNC_TEXTRACT_FILE_SIZE = 10 * 1024 * 1024
+logger = logging.getLogger(__name__)
 
 
-async def extract_document_from_file(file: UploadFile) -> DocumentExtractResponse:
-    validate_file_metadata(file)
-
-    data = await file.read()
-    validate_file_data(data)
-
-    if file.content_type == "application/pdf":
-        data = convert_pdf_or_raise(data)
-
-    aws_response = await call_textract_or_raise(data)
-
-    fields = merge_and_dedup_fields(
-        extract_kv_pairs_from_forms(aws_response),
-        extract_pairs_from_lines(aws_response),
-        extract_fields_from_wallet_lines(aws_response),
+async def extract_document_from_file(
+    file: UploadFile,
+    request_id: str = "unknown",
+) -> DocumentExtractResponse:
+    started_at = perf_counter()
+    filename = file.filename or "unnamed"
+    logger.info(
+        "Extractor started request_id=%s filename=%s content_type=%s",
+        request_id,
+        filename,
+        file.content_type,
     )
+    outcome = "success"
 
-    filename_datetime = extract_datetime_from_filename(file.filename)
-    if filename_datetime:
-        fields.append(
-            ExtractedField(
-                key="fecha archivo",
-                value=filename_datetime,
-                confidence=999.0,
+    try:
+        validate_file_metadata(file)
+
+        data = await file.read()
+        validate_file_data(data)
+
+        if file.content_type == "application/pdf":
+            data = convert_pdf_or_raise(data)
+
+        aws_response = await call_textract_or_raise(data, request_id=request_id)
+
+        fields = merge_and_dedup_fields(
+            extract_kv_pairs_from_forms(aws_response),
+            extract_pairs_from_lines(aws_response),
+            extract_fields_from_wallet_lines(aws_response),
+        )
+
+        filename_datetime = extract_datetime_from_filename(file.filename)
+        if filename_datetime:
+            fields.append(
+                ExtractedField(
+                    key="fecha archivo",
+                    value=filename_datetime,
+                    confidence=999.0,
+                )
             )
-        )
 
-    if not fields:
-        return DocumentExtractResponse(
-            ok=False,
-            document=None,
-            partial={},
-            missing=[],
-            errors=[ParseIssue(field="*", message="No fields extracted from Textract response")],
-            raw_fields=[],
-        )
+        if not fields:
+            return DocumentExtractResponse(
+                ok=False,
+                document=None,
+                partial={},
+                missing=[],
+                errors=[
+                    ParseIssue(
+                        field="*",
+                        message="No fields extracted from Textract response",
+                    )
+                ],
+                raw_fields=[],
+            )
 
-    return build_document_response(fields)
+        return build_document_response(fields)
+    except HTTPException as exc:
+        outcome = f"http_{exc.status_code}"
+        raise
+    except Exception:
+        outcome = "unhandled_error"
+        logger.exception(
+            "Extractor unhandled error request_id=%s filename=%s",
+            request_id,
+            filename,
+        )
+        raise
+    finally:
+        logger.info(
+            "Extractor finished request_id=%s filename=%s outcome=%s duration_ms=%s",
+            request_id,
+            filename,
+            outcome,
+            round((perf_counter() - started_at) * 1000),
+        )
 
 
 def validate_file_metadata(file: UploadFile) -> None:
@@ -95,8 +147,34 @@ def convert_pdf_or_raise(data: bytes) -> bytes:
         raise HTTPException(status_code=422, detail=f"PDF conversion failed: {str(exc)}") from exc
 
 
-async def call_textract_or_raise(data: bytes):
+async def call_textract_or_raise(data: bytes, request_id: str = "unknown"):
     try:
-        return await analyze_document_bytes(data)
-    except (BotoCoreError, ClientError) as exc:
-        raise HTTPException(status_code=502, detail=f"Textract error: {str(exc)}") from exc
+        return await analyze_document_bytes(data, request_id=request_id)
+    except ClientError as exc:
+        error_code = get_client_error_code(exc)
+        logger.error(
+            "Textract client error request_id=%s error_code=%s",
+            request_id,
+            error_code,
+        )
+        if error_code in TRANSIENT_TEXTRACT_ERROR_CODES:
+            raise HTTPException(
+                status_code=429,
+                detail="Textract is temporarily busy. Please retry this file.",
+            ) from exc
+        raise HTTPException(
+            status_code=502,
+            detail=f"Textract rejected the document ({error_code}).",
+        ) from exc
+    except (ConnectTimeoutError, ReadTimeoutError, EndpointConnectionError) as exc:
+        logger.error("Textract timeout request_id=%s error=%s", request_id, exc)
+        raise HTTPException(
+            status_code=504,
+            detail="Textract did not respond in time. Please retry this file.",
+        ) from exc
+    except BotoCoreError as exc:
+        logger.error("Textract SDK error request_id=%s error=%s", request_id, exc)
+        raise HTTPException(
+            status_code=502,
+            detail="Unable to process the document with Textract.",
+        ) from exc

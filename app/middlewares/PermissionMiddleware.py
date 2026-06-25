@@ -1,7 +1,11 @@
 from fastapi import Request
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.status import HTTP_403_FORBIDDEN, HTTP_401_UNAUTHORIZED
+from starlette.status import (
+    HTTP_403_FORBIDDEN,
+    HTTP_401_UNAUTHORIZED,
+    HTTP_500_INTERNAL_SERVER_ERROR,
+)
 from jose import jwt, JWTError
 from app.db.database import SessionLocal
 from app.models import Endpoints, Permission, Logs
@@ -33,16 +37,23 @@ class PermissionMiddleware(BaseHTTPMiddleware):
             if not auth_header or not auth_header.startswith("Bearer "):
                 logging.warning("❌ No Authorization header")
                 _save_log(path, method, user="no-token")
-                return JSONResponse(status_code=HTTP_403_FORBIDDEN, content={"detail": "No token provided"})
+                return JSONResponse(status_code=HTTP_401_UNAUTHORIZED, content={"detail": "No token provided"})
 
-            token = auth_header.split(" ")[1]
+            token = auth_header.removeprefix("Bearer ").strip()
+            if not token:
+                logging.warning("❌ Empty bearer token")
+                _save_log(path, method, user="no-token")
+                return JSONResponse(
+                    status_code=HTTP_401_UNAUTHORIZED,
+                    content={"detail": "No token provided"},
+                )
             try:
                 payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
                 logging.info("✅ Token payload")
             except JWTError as e:
                 logging.error(f"❌ JWT decoding error: {e}")
                 _save_log(path, method, user="invalid-token")
-                return JSONResponse(status_code=HTTP_403_FORBIDDEN, content={"detail": "Invalid token"})
+                return JSONResponse(status_code=HTTP_401_UNAUTHORIZED, content={"detail": "Invalid token"})
 
             perm_id = payload.get("perm_id")
             user_hierarchy = payload.get("hierarchy")
@@ -68,7 +79,7 @@ class PermissionMiddleware(BaseHTTPMiddleware):
             if not has_access:
                 logging.warning(f"⛔ Access denied for perm_id={perm_id} to path={path}")
                 _save_log(path, method, user=f"{user_email} (denied)")
-                return JSONResponse(status_code=HTTP_401_UNAUTHORIZED, content={"detail": "Permission denied"})
+                return JSONResponse(status_code=HTTP_403_FORBIDDEN, content={"detail": "Permission denied"})
 
             # Request autorizada: llamamos la ruta y logeamos con status
             response = await call_next(request)
@@ -82,7 +93,10 @@ class PermissionMiddleware(BaseHTTPMiddleware):
                 _save_log(request.url.path, request.method, user="middleware-error")
             except Exception:
                 pass
-            return JSONResponse(status_code=HTTP_403_FORBIDDEN, content={"detail": f"Middleware failed: {str(e)}"})
+            return JSONResponse(
+                status_code=HTTP_500_INTERNAL_SERVER_ERROR,
+                content={"detail": "Internal authentication middleware error"},
+            )
         finally:
             db.close()
 
