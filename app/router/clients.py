@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from fastapi import APIRouter, Depends
 from app.db.database import get_db
 from starlette import status
-from app.schemas.clients import ClientResponse, NewClientRequest
+from app.schemas.clients import ClientResponse, NewClientRequest, UpdateClientRequest
 from app.services.auth_service import get_current_user
 from app.services.DBService import DBService 
 
@@ -31,6 +31,18 @@ async def create_new_client(db: db_dependency, user: user_dependency, new_client
   db_service = DBService(db=db, req_user=user)
   create_client_model = db_service.client.create(new_client_request)
   return create_client_model
+
+
+@router.put("/update", status_code=status.HTTP_200_OK)
+async def update_client(
+  db: db_dependency,
+  user: user_dependency,
+  client_id: int,
+  update_client_request: UpdateClientRequest
+):
+  db_service = DBService(db=db, req_user=user)
+  update_client_model = db_service.client.update(client_id, update_client_request)
+  return update_client_model
 
 
 @router.delete("/delete", status_code=status.HTTP_200_OK)

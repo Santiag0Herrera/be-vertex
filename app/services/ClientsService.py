@@ -1,11 +1,11 @@
 from typing import List
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from app.models import Clients, Users, Permission, CustomersBalance
 from sqlalchemy.orm import Session
 from .ErrorService import ErrorService
 from .SuccessService import SuccessService
 from app.schemas.auth import ReqUser
-from app.schemas.clients import ClientResponse, NewClientRequest
+from app.schemas.clients import ClientResponse, NewClientRequest, UpdateClientRequest
 from app.services.auth_service import bcrypt_context
 
 class ClientService():
@@ -31,16 +31,25 @@ class ClientService():
     """
     Creates a new client in the requesting client's entity.
     """
-    client_exists_model = self.db.query(Clients).filter(
-      Clients.email == new_client_request.email.strip().lower()
-    ).first()
+    normalized_email = new_client_request.email.strip().lower()
+    existing_clients = self.db.query(Clients).filter(
+      or_(
+        Clients.email == normalized_email,
+        Clients.cuit == new_client_request.cuit
+      )
+    ).all()
 
     user_exists_model = self.db.query(Users).filter(
-      Users.email == new_client_request.email.strip().lower()
+      Users.email == normalized_email
     ).first()
 
-    if client_exists_model or user_exists_model:
+    if user_exists_model or any(
+      client.email == normalized_email for client in existing_clients
+    ):
       self.error.raise_conflict(f"Cliente {new_client_request.email} ya existe.")
+
+    if any(client.cuit == new_client_request.cuit for client in existing_clients):
+      self.error.raise_conflict(f"Ya existe un cliente con el CUIT {new_client_request.cuit}.")
     
     auto_generated_password = (new_client_request.first_name[:2] + new_client_request.last_name + "123").lower()
 
@@ -50,7 +59,8 @@ class ClientService():
     create_client_model = Clients(
       first_name=new_client_request.first_name,
       last_name=new_client_request.last_name,
-      email=new_client_request.email.strip().lower(),
+      email=normalized_email,
+      cuit=new_client_request.cuit,
       hashed_password=bcrypt_context.hash(auto_generated_password),
       phone=new_client_request.phone,
       perm_id=clients_permission_model.id,
@@ -60,6 +70,26 @@ class ClientService():
     self.db.add(create_client_model)
     self.db.commit()
     return self.success.response({'message': 'Cliente creado con exito!', 'generated_password': auto_generated_password})
+
+
+  def update(self, id_client: int, update_client_request: UpdateClientRequest):
+    client_model = self.db.query(Clients).filter(
+      Clients.id == id_client,
+      Clients.entity_id == self.req_user.get("entity_id"),
+      Clients.enabled == True
+    ).first()
+
+    if client_model is None:
+      self.error.raise_not_found("Cliente")
+
+    client_model.first_name = update_client_request.first_name
+    client_model.last_name = update_client_request.last_name
+    client_model.phone = update_client_request.phone
+    client_model.cuit = update_client_request.cuit
+
+    self.db.add(client_model)
+    self.db.commit()
+    return self.success.response("Cliente actualizado exitosamente.")
   
 
   def delete(self, id_client: int):
@@ -94,6 +124,7 @@ class ClientService():
         'first_name': client_model.first_name,
         'last_name': client_model.last_name,
         'email': client_model.email,
+        'cuit': client_model.cuit,
         'permission_level': client_model.permission,
         'phone': client_model.phone,
         'accounts': [

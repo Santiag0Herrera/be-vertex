@@ -163,6 +163,9 @@ class Clients(Base):
     first_name = Column(String, nullable=False)
     last_name = Column(String, nullable=False)
     email = Column(String, unique=True, nullable=False)
+    # Nullable mientras se completan los CUIT de los clientes existentes.
+    # Las altas y modificaciones lo exigen mediante los esquemas de Pydantic.
+    cuit = Column(String(11), nullable=True)
     hashed_password = Column(String, nullable=False)
     phone = Column(String)
     perm_id = Column(Integer, ForeignKey("permissions.id"), nullable=False)
