@@ -24,8 +24,9 @@ from app.services.extractor.extractors import (
     extract_pairs_from_lines,
     merge_and_dedup_fields,
 )
+from app.services.extractor.gemini_fallback import recover_missing_fields
 from app.services.extractor.heuristics import extract_datetime_from_filename
-from app.services.extractor.models import DocumentExtractResponse, ExtractedField, ParseIssue
+from app.services.extractor.models import DocumentExtractResponse, ExtractedField
 from app.services.extractor.pdf_converter import convert_first_pdf_page_to_png
 
 
@@ -57,13 +58,14 @@ async def extract_document_from_file(
     try:
         validate_file_metadata(file)
 
-        data = await file.read()
-        validate_file_data(data)
+        original_data = await file.read()
+        validate_file_data(original_data)
 
+        textract_data = original_data
         if file.content_type == "application/pdf":
-            data = convert_pdf_or_raise(data)
+            textract_data = convert_pdf_or_raise(original_data)
 
-        aws_response = await call_textract_or_raise(data, request_id=request_id)
+        aws_response = await call_textract_or_raise(textract_data, request_id=request_id)
 
         fields = merge_and_dedup_fields(
             extract_kv_pairs_from_forms(aws_response),
@@ -81,22 +83,22 @@ async def extract_document_from_file(
                 )
             )
 
-        if not fields:
-            return DocumentExtractResponse(
-                ok=False,
-                document=None,
-                partial={},
-                missing=[],
-                errors=[
-                    ParseIssue(
-                        field="*",
-                        message="No fields extracted from Textract response",
-                    )
-                ],
-                raw_fields=[],
-            )
+        textract_result = build_document_response(fields)
+        if textract_result.ok:
+            return textract_result
 
-        return build_document_response(fields)
+        gemini_fields = await recover_missing_fields(
+            original_data=original_data,
+            content_type=file.content_type,
+            textract_result=textract_result,
+            request_id=request_id,
+        )
+        if not gemini_fields:
+            return textract_result
+
+        return build_document_response(
+            merge_and_dedup_fields(fields, gemini_fields)
+        )
     except HTTPException as exc:
         outcome = f"http_{exc.status_code}"
         raise

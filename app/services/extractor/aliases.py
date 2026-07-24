@@ -14,6 +14,7 @@ ALIAS_PAIRS: List[Tuple[str, str]] = [
     ("importe acreditado", "amount"),
     ("importe debitado", "amount"),
     ("importe transferido", "amount"),
+    ("transferencia enviada", "amount"),
     ("importe operacion", "amount"),
     ("importe operado", "amount"),
     ("monto", "amount"),
