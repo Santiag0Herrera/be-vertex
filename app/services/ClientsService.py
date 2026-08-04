@@ -138,6 +138,7 @@ class ClientService():
                 } if balance.currency else None
             }
             for balance in client_model.balance
+            if balance.enabled
         ],
         'entity': {
             'name': client_model.entity.name,

@@ -54,3 +54,13 @@ async def update_fee_percentage(
     new_fee_percentage=new_fee_percentage
   )
   return update_fee_response
+
+
+@router.delete("/delete", status_code=status.HTTP_200_OK)
+async def delete_balance(
+  db: db_dependency,
+  user: user_dependency,
+  balance_id: int
+):
+  db_service = DBService(db=db, req_user=user)
+  return db_service.balance.delete(balance_id=balance_id)

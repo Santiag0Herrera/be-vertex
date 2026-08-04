@@ -187,6 +187,7 @@ class CustomersBalance(Base):
     balance_currency_id = Column(Integer, ForeignKey("currency.id"), nullable=False)
     last_update = Column(DateTime, nullable=False, default=datetime.utcnow)
     fee_percentage = Column(Float, nullable=False, default=0)
+    enabled = Column(Boolean, nullable=False, default=True)
 
     client = relationship("Clients", back_populates="balance", lazy="joined")
     currency = relationship("Currency", back_populates="balances")

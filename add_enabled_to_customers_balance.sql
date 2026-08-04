@@ -1,0 +1,2 @@
+ALTER TABLE customers_balance
+ADD COLUMN enabled BOOLEAN NOT NULL DEFAULT TRUE;

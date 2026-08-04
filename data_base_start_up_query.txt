@@ -72,7 +72,8 @@ CREATE TABLE customers_balance (
     client_id INTEGER UNIQUE NOT NULL REFERENCES clients(id),
     balance_amount DOUBLE PRECISION NOT NULL DEFAULT 0.0,
     balance_currency_id INTEGER NOT NULL REFERENCES currency(id),
-    last_update TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
+    last_update TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    enabled BOOLEAN NOT NULL DEFAULT TRUE
 );
 
 -- 9) Endpoints (depende de permissions)

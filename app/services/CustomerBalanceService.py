@@ -13,7 +13,10 @@ class CustomerBalanceService:
     self.success = SuccessService()
   
   def _get_balance(self, id):
-    balance_model = self.db.query(CustomersBalance).filter(CustomersBalance.id == id).first()
+    balance_model = self.db.query(CustomersBalance).filter(
+      CustomersBalance.id == id,
+      CustomersBalance.enabled == True
+    ).first()
     self.error.raise_if_none(balance_model, "Balance")
     return balance_model
 
@@ -45,6 +48,7 @@ class CustomerBalanceService:
       .join(CustomersBalance.currency)
       .filter(Clients.enabled == True)
       .filter(Clients.entity_id == entity_id)
+      .filter(CustomersBalance.enabled == True)
       .options(
         joinedload(CustomersBalance.client), 
         joinedload(CustomersBalance.currency)
@@ -60,7 +64,9 @@ class CustomerBalanceService:
       .join(CustomersBalance.client)
       .join(CustomersBalance.currency)
       .filter(Clients.enabled == True)
+      .filter(Clients.entity_id == self.req_user.get("entity_id"))
       .filter(CustomersBalance.id == account_id)
+      .filter(CustomersBalance.enabled == True)
       .options(
         joinedload(CustomersBalance.client), 
         joinedload(CustomersBalance.currency)
@@ -132,3 +138,24 @@ class CustomerBalanceService:
     self.db.add(balance_model)
     self.db.commit()
     return {'status': 'ok', 'result': "Porcentaje de fee actualizado correctamente."}
+
+
+  def delete(self, balance_id: int):
+    balance_model = (
+      self.db.query(CustomersBalance)
+      .join(CustomersBalance.client)
+      .filter(
+        CustomersBalance.id == balance_id,
+        Clients.entity_id == self.req_user.get("entity_id"),
+        CustomersBalance.enabled == True
+      )
+      .first()
+    )
+
+    if balance_model is None:
+      self.error.raise_not_found("Balance")
+
+    balance_model.enabled = False
+    self.db.add(balance_model)
+    self.db.commit()
+    return self.success.response("Balance deshabilitado correctamente.")
