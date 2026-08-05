@@ -203,6 +203,7 @@ def update_trx_status(
 ):
     db = SessionLocal()
     fee_amount = calculate_fee_amount(trx_amount, fee_percentage)
+    customer_amount = normalize_amount(trx_amount) - fee_amount
     try:
         result = db.execute(
         text("""
@@ -232,25 +233,37 @@ def update_trx_status(
             )
             return False
 
-        db.execute(
+        balance_result = db.execute(
             text("""
                 UPDATE customers_balance
-                SET balance_amount = balance_amount + :amount
+                SET
+                    balance_amount = balance_amount + :customer_amount,
+                    fee_amount = fee_amount + :fee_amount,
+                    last_update = CURRENT_TIMESTAMP
                 WHERE id = :id
+                  AND enabled = TRUE
             """),
             {
-                "amount": trx_amount,
+                "customer_amount": customer_amount,
+                "fee_amount": fee_amount,
                 "id": customer_balance_id,
             },
         )
 
+        if balance_result.rowcount == 0:
+            raise RuntimeError(
+                f"Active customer balance {customer_balance_id} was not found"
+            )
+
         db.commit()
 
         logger.info(
-            "[BALANCE UPDATED] trx_id=%s balance_id=%s amount=%s",
+            "[BALANCE UPDATED] trx_id=%s balance_id=%s gross_amount=%s customer_amount=%s fee_amount=%s",
             trx_id,
             customer_balance_id,
             trx_amount,
+            customer_amount,
+            fee_amount,
         )
 
         return True

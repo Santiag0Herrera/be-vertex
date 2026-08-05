@@ -184,6 +184,7 @@ class CustomersBalance(Base):
     id = Column(Integer, primary_key=True, index=True)
     client_id = Column(Integer, ForeignKey("clients.id"), unique=True, nullable=False)
     balance_amount = Column(Float, nullable=False, default=0.0)
+    fee_amount = Column(Float, nullable=False, default=0.0)
     balance_currency_id = Column(Integer, ForeignKey("currency.id"), nullable=False)
     last_update = Column(DateTime, nullable=False, default=datetime.utcnow)
     fee_percentage = Column(Float, nullable=False, default=0)
@@ -191,6 +192,25 @@ class CustomersBalance(Base):
 
     client = relationship("Clients", back_populates="balance", lazy="joined")
     currency = relationship("Currency", back_populates="balances")
+    fee_withdrawals = relationship("FeeWithdrawals", back_populates="customer_balance")
+
+
+class FeeWithdrawals(Base):
+    __tablename__ = "fee_withdrawals"
+
+    id = Column(Integer, primary_key=True, index=True)
+    customer_balance_id = Column(Integer, ForeignKey("customers_balance.id"), nullable=False)
+    withdrawn_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    entity_id = Column(Integer, ForeignKey("entities.id"), nullable=False)
+    currency_id = Column(Integer, ForeignKey("currency.id"), nullable=False)
+    amount = Column(Float, nullable=False)
+    date = Column(DateTime, nullable=False, default=datetime.utcnow)
+    status = Column(String, nullable=False, default="consolidado")
+
+    customer_balance = relationship("CustomersBalance", back_populates="fee_withdrawals")
+    withdrawn_by_user = relationship("Users")
+    entity = relationship("Entity")
+    currency = relationship("Currency")
 
 
 class Currency(Base):

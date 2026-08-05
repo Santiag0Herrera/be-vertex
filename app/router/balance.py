@@ -1,11 +1,11 @@
 from typing import Annotated
 from sqlalchemy.orm import Session
 from starlette import status
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from app.db.database import get_db
 from app.services.auth_service import get_current_user
 from app.services.DBService import DBService 
-from app.schemas.customerBalance import CustomerBalanceCreateRequest
+from app.schemas.customerBalance import CustomerBalanceCreateRequest, FeeWithdrawalRequest
 
 router = APIRouter(
   prefix='/balance',
@@ -46,7 +46,7 @@ async def update_fee_percentage(
   db: db_dependency, 
   user: user_dependency,
   balance_id: int,
-  new_fee_percentage: float
+  new_fee_percentage: float = Query(..., ge=0, le=100)
 ):
   db_service = DBService(db=db, req_user=user)
   update_fee_response = db_service.balance.update_fee_percentage(
@@ -64,3 +64,23 @@ async def delete_balance(
 ):
   db_service = DBService(db=db, req_user=user)
   return db_service.balance.delete(balance_id=balance_id)
+
+
+@router.post("/withdraw-fee", status_code=status.HTTP_201_CREATED)
+async def withdraw_fee(
+  db: db_dependency,
+  user: user_dependency,
+  withdrawal_request: FeeWithdrawalRequest
+):
+  db_service = DBService(db=db, req_user=user)
+  return db_service.balance.withdraw_fee(withdrawal_request)
+
+
+@router.get("/fee-withdrawals", status_code=status.HTTP_200_OK)
+async def get_fee_withdrawals(
+  db: db_dependency,
+  user: user_dependency,
+  balance_id: int
+):
+  db_service = DBService(db=db, req_user=user)
+  return db_service.balance.get_fee_withdrawals(balance_id)

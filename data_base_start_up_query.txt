@@ -71,9 +71,22 @@ CREATE TABLE customers_balance (
     id SERIAL PRIMARY KEY,
     client_id INTEGER UNIQUE NOT NULL REFERENCES clients(id),
     balance_amount DOUBLE PRECISION NOT NULL DEFAULT 0.0,
+    fee_amount DOUBLE PRECISION NOT NULL DEFAULT 0.0,
     balance_currency_id INTEGER NOT NULL REFERENCES currency(id),
     last_update TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    fee_percentage DOUBLE PRECISION NOT NULL DEFAULT 0.0,
     enabled BOOLEAN NOT NULL DEFAULT TRUE
+);
+
+CREATE TABLE fee_withdrawals (
+    id SERIAL PRIMARY KEY,
+    customer_balance_id INTEGER NOT NULL REFERENCES customers_balance(id),
+    withdrawn_by_user_id INTEGER NOT NULL REFERENCES users(id),
+    entity_id INTEGER NOT NULL REFERENCES entities(id),
+    currency_id INTEGER NOT NULL REFERENCES currency(id),
+    amount DOUBLE PRECISION NOT NULL CHECK (amount > 0),
+    date TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    status VARCHAR(255) NOT NULL DEFAULT 'consolidado'
 );
 
 -- 9) Endpoints (depende de permissions)
@@ -127,6 +140,8 @@ CREATE INDEX idx_entities_cbu_id ON entities(cbu_id);
 
 CREATE INDEX idx_customers_balance_client_id ON customers_balance(client_id);
 CREATE INDEX idx_customers_balance_currency_id ON customers_balance(balance_currency_id);
+CREATE INDEX idx_fee_withdrawals_balance_id ON fee_withdrawals(customer_balance_id);
+CREATE INDEX idx_fee_withdrawals_entity_id ON fee_withdrawals(entity_id);
 
 CREATE INDEX idx_endpoints_perm_id ON endpoints(perm_id);
 
