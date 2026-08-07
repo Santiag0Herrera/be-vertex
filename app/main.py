@@ -14,6 +14,7 @@ from app.router import (
     extractor,
     textract,
     logs,
+    dashboard,
 )
 from app.middlewares.PermissionMiddleware import PermissionMiddleware
 from dotenv import load_dotenv
@@ -49,3 +50,4 @@ app.include_router(currency.router)
 app.include_router(extractor.router)
 app.include_router(textract.router)
 app.include_router(logs.router)
+app.include_router(dashboard.router)
