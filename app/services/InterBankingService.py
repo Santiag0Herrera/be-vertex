@@ -1,5 +1,6 @@
 from .ErrorService import ErrorService
 from .SuccessService import SuccessService
+from fastapi import HTTPException
 import os
 import requests
 import datetime
@@ -28,7 +29,41 @@ class InterBankingService:
         }
 
     @staticmethod
+    def _parse_json_response(response, service_name: str):
+        if not response.content:
+            raise HTTPException(
+                status_code=502,
+                detail=f"{service_name} returned an empty response. status_code={response.status_code}",
+            )
+
+        try:
+            result = response.json()
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=502,
+                detail=(
+                    f"{service_name} returned a non-JSON response. "
+                    f"status_code={response.status_code} body={response.text[:500]}"
+                ),
+            ) from exc
+
+        if response.status_code >= 400:
+            raise HTTPException(
+                status_code=502,
+                detail=f"{service_name} request failed. status_code={response.status_code} body={result}",
+            )
+
+        return result
+
+    @staticmethod
+    def _get_bearer_token(token):
+        if isinstance(token, dict):
+            return token.get("access_token") or token.get("id_token")
+        return token
+
+    @staticmethod
     def _is_token_expired(token: str) -> bool:
+        token = InterBankingService._get_bearer_token(token)
         if not token:
             return True
         try:
@@ -53,7 +88,11 @@ class InterBankingService:
         Obtains Inter Banking authentication token for requests.
         """
         url = self.ib_auth_url
-        payload = f"client_id={self.client_id}&client_secret={self.client_secret}&grant_type=client_credentials&="
+        payload = {
+            "client_id": self.client_id,
+            "client_secret": self.client_secret,
+            "grant_type": "client_credentials",
+        }
         headers = {
             "Content-Type": "application/x-www-form-urlencoded",
             "Accept": "application/json",
@@ -61,9 +100,16 @@ class InterBankingService:
             "Cookie": "JSESSIONID=588CA22D9BBCA573D8434D2AD597A7E0; incap_ses_7224_2935514=YgIqC6S/NkblSJPYMs5AZO04lmgAAAAAy1GPB8rcP6uHJzmXuw6M7w==; visid_incap_2935514=YMhpCTdhT3+dABCItC/te+w4lmgAAAAAQUIPAAAAAACSdf1G2IB40aoC6mXv7MpU; a911021363f92e0661f0698f562fc1d7=abdb1d2067e3edc11e05c707d6cd0e2e",
         }
         response = requests.request("POST", url, headers=headers, data=payload)
-        result = response.json()
-        os.environ["MS_INTER_BANKING_AT"] = result.get("id_token")
-        self.token = result.get("id_token")
+        result = self._parse_json_response(response, "Interbanking auth")
+        bearer_token = self._get_bearer_token(result)
+        if not bearer_token:
+            raise HTTPException(
+                status_code=502,
+                detail=f"Interbanking auth response did not include access_token or id_token. body={result}",
+            )
+
+        os.environ["MS_INTER_BANKING_AT"] = bearer_token
+        self.token = result
         return result
 
 
@@ -80,27 +126,12 @@ class InterBankingService:
         payload = {}
         headers = {
             "Accept": "application/json",
-            "Authorization": f"Bearer {self.token.get('access_token')}",
+            "Authorization": f"Bearer {self._get_bearer_token(self.token)}",
             "client_id": self.client_id,
         }
-        response = requests.request("GET", url, headers=headers, data=payload)
         response = requests.get(url, headers=headers)
 
-        if not response.content:
-            raise Exception(
-                f"Interbanking empty response | status_code={response.status_code} | url={url}"
-            )
-        try:
-            result = response.json()
-        except ValueError:
-            raise Exception(
-                f"Interbanking non-json response | status_code={response.status_code} | body={response.text[:500]}"
-            )
-        if response.status_code >= 400:
-            raise Exception(
-                f"Interbanking request failed | status_code={response.status_code} | body={result}"
-            )
-        result = response.json()
+        result = self._parse_json_response(response, "Interbanking movements")
         return result
 
 
@@ -119,11 +150,11 @@ class InterBankingService:
         payload = {}
         headers = {
             "Accept": "application/json",
-            "Authorization": f"Bearer {self.token.get('access_token')}",
+            "Authorization": f"Bearer {self._get_bearer_token(self.token)}",
             "client_id": self.client_id,
         }
         response = requests.request("GET", url, headers=headers, data=payload)
-        result = response.json()
+        result = self._parse_json_response(response, "Interbanking historical movements")
         return result
     
 
@@ -177,11 +208,11 @@ class InterBankingService:
         payload = {}
         headers = {
             "Accept": "application/json",
-            "Authorization": f"Bearer {self.token.get('access_token')}",
+            "Authorization": f"Bearer {self._get_bearer_token(self.token)}",
             "client_id": self.client_id,
         }
         repsonse = requests.request("GET", url=url, headers=headers, data=payload)
-        result = repsonse.json()
+        result = self._parse_json_response(repsonse, "Interbanking balances")
         accounts_list = result.get("accounts")
         if accounts_list is None:
             self.error.raise_not_found(accounts_list)
@@ -207,11 +238,11 @@ class InterBankingService:
         payload = {}
         headers = {
             "Accept": "application/json",
-            "Authorization": f"Bearer {self.token.get('access_token')}",
+            "Authorization": f"Bearer {self._get_bearer_token(self.token)}",
             "client_id": self.client_id,
         }
         repsonse = requests.request("GET", url=url, headers=headers, data=payload)
-        result = repsonse.json()
+        result = self._parse_json_response(repsonse, "Interbanking accounts")
         return result
 
 

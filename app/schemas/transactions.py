@@ -54,3 +54,13 @@ class MovementsRequest(BaseModel):
 class AllMovementsRequest:
   date_since: Optional[str]
   date_until: Optional[str]
+
+
+class ReconciliationJobResponse(BaseModel):
+  checked: int
+  conciliated: int
+  repeated: int
+  expired: int
+  skipped: int
+  still_pending: int
+  duration_seconds: float

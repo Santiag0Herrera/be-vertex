@@ -1,6 +1,8 @@
 from typing import Annotated
 from sqlalchemy.orm import Session
-from fastapi import APIRouter, Depends, Query
+import asyncio
+
+from fastapi import APIRouter, Depends, HTTPException, Query
 from app.db.database import get_db
 from starlette import status
 from app.services.auth_service import get_current_user
@@ -10,7 +12,9 @@ from app.schemas.transactions import (
     UploadDocumentRequest,
     MovementsRequest,
     AllMovementsRequest,
+    ReconciliationJobResponse,
 )
+from app.jobs.validate_trx import run as run_reconciliation_job
 from app.services.DBService import DBService
 from app.services.InterBankingService import InterBankingService
 from typing import Optional
@@ -19,6 +23,23 @@ router = APIRouter(prefix="/trx", tags=["Transactions"])
 
 db_dependency = Annotated[Session, Depends(get_db)]
 user_dependency = Annotated[dict, Depends(get_current_user)]
+reconciliation_job_lock = asyncio.Lock()
+
+
+@router.post(
+    "/reconcile-pending",
+    response_model=ReconciliationJobResponse,
+    status_code=status.HTTP_200_OK,
+)
+async def reconcile_pending_transactions(user: user_dependency):
+    if reconciliation_job_lock.locked():
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="The reconciliation job is already running",
+        )
+
+    async with reconciliation_job_lock:
+        return await run_reconciliation_job()
 
 
 @router.get("/all", status_code=status.HTTP_200_OK)

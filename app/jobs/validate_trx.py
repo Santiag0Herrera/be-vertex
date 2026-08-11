@@ -7,7 +7,8 @@ import logging
 from decimal import Decimal
 
 from dotenv import load_dotenv
-from sqlalchemy import text
+from dateutil.relativedelta import relativedelta
+from sqlalchemy import bindparam, text
 
 from app.db.database import SessionLocal
 from app.services.BusinessCalendarService import BusinessCalendarService
@@ -62,6 +63,45 @@ def get_pending_trx():
         return db.execute(text(SQL)).mappings().all()
     except Exception:
         logger.exception("[ERROR] failed_to_fetch_pending_transactions")
+        raise
+    finally:
+        db.close()
+
+
+def get_expiration_cutoff(reference_time=None):
+    return (reference_time or datetime.datetime.now()) - relativedelta(months=1)
+
+
+def expire_old_pending_trx(trx_ids, reference_time=None):
+    """Expire eligible pending transactions after one full calendar month."""
+    trx_ids = list(set(trx_ids))
+    if not trx_ids:
+        return 0
+
+    cutoff = get_expiration_cutoff(reference_time)
+    db = SessionLocal()
+    try:
+        statement = text(
+            """
+            UPDATE trx
+            SET status = 'vencida'
+            WHERE status = 'pendiente'
+              AND date <= :cutoff
+              AND trx_id IN :trx_ids
+            """
+        ).bindparams(bindparam("trx_ids", expanding=True))
+        result = db.execute(
+            statement,
+            {
+                "cutoff": cutoff,
+                "trx_ids": trx_ids,
+            },
+        )
+        db.commit()
+        return result.rowcount
+    except Exception:
+        db.rollback()
+        logger.exception("[ERROR] failed_to_expire_pending_transactions")
         raise
     finally:
         db.close()
@@ -331,7 +371,7 @@ def calculate_fee_amount(amount, fee_percentage):
     return (amount * fee_percentage / Decimal("100")).quantize(Decimal("0.01"))
 
 
-async def run() -> None:
+async def run() -> dict:
     started_at = datetime.datetime.now()
     current_time = started_at.strftime("%Y-%m-%d %H:%M:%S")
 
@@ -343,7 +383,12 @@ async def run() -> None:
     ib_service = InterBankingService()
     business_calendar = BusinessCalendarService()
 
-    accounts_model = await ib_service.get_accounts()
+    try:
+        accounts_model = await ib_service.get_accounts()
+    except Exception:
+        logger.exception("[ERROR] failed_to_fetch_interbanking_accounts")
+        raise
+
     accounts = accounts_model.get("accounts", [])
 
     pending_transactions = get_pending_trx()
@@ -356,12 +401,21 @@ async def run() -> None:
 
     if not pending_transactions:
         logger.info("[JOB END] no_pending_transactions_found")
-        return
+        return {
+            "checked": 0,
+            "conciliated": 0,
+            "repeated": 0,
+            "expired": 0,
+            "skipped": 0,
+            "still_pending": 0,
+            "duration_seconds": 0,
+        }
 
     updated_trx_count = 0
     repeated_trx_count = 0
     checked_trx_count = 0
     skipped_trx_count = 0
+    failed_validation_trx_ids = set()
 
     for acc in accounts:
         account_number = acc.get("account_number")
@@ -524,24 +578,53 @@ async def run() -> None:
 
             except Exception:
                 skipped_trx_count += 1
+                failed_validation_trx_ids.add(trx_id)
                 logger.exception(
                     "[ERROR] trx_validation_failed trx_id=%s account_number=%s",
                     trx_id,
                     account_number,
                 )
 
+    eligible_for_expiration = {
+        trx.get("trx_id")
+        for trx in pending_transactions
+        if trx.get("trx_id") not in failed_validation_trx_ids
+    }
+    expired_trx_count = expire_old_pending_trx(
+        eligible_for_expiration,
+        reference_time=started_at,
+    )
+
     finished_at = datetime.datetime.now()
     duration = (finished_at - started_at).total_seconds()
+    still_pending_count = max(
+        0,
+        len(pending_transactions)
+        - updated_trx_count
+        - repeated_trx_count
+        - expired_trx_count,
+    )
 
     logger.info(
-        "[JOB END] validate_trx checked=%s conciliated=%s repeated=%s skipped=%s still_pending=%s duration_seconds=%.2f",
+        "[JOB END] validate_trx checked=%s conciliated=%s repeated=%s expired=%s skipped=%s still_pending=%s duration_seconds=%.2f",
         checked_trx_count,
         updated_trx_count,
         repeated_trx_count,
+        expired_trx_count,
         skipped_trx_count,
-        len(pending_transactions) - updated_trx_count - repeated_trx_count,
+        still_pending_count,
         duration,
     )
+
+    return {
+        "checked": checked_trx_count,
+        "conciliated": updated_trx_count,
+        "repeated": repeated_trx_count,
+        "expired": expired_trx_count,
+        "skipped": skipped_trx_count,
+        "still_pending": still_pending_count,
+        "duration_seconds": round(duration, 2),
+    }
 
 
 if __name__ == "__main__":

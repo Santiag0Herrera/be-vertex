@@ -21,6 +21,7 @@ ALGORITHM = "HS256"
 class PermissionMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         db = SessionLocal()
+        downstream_started = False
         try:
             path = request.url.path
             method = request.method
@@ -82,12 +83,17 @@ class PermissionMiddleware(BaseHTTPMiddleware):
                 return JSONResponse(status_code=HTTP_403_FORBIDDEN, content={"detail": "Permission denied"})
 
             # Request autorizada: llamamos la ruta y logeamos con status
+            downstream_started = True
             response = await call_next(request)
             _save_log(path, method, user=user_email)
             return response
 
         except Exception as e:
-            logging.error(f"🔥 Middleware error: {e}")
+            if downstream_started:
+                logging.exception("🔥 Downstream route error")
+                raise
+
+            logging.exception(f"🔥 Middleware error: {e}")
             # Logueamos el fallo del middleware también
             try:
                 _save_log(request.url.path, request.method, user="middleware-error")
@@ -115,3 +121,5 @@ def _save_log(endpoint: str, method: str, user: str):
       except Exception as e:
           # No bloqueamos la request por un error de logging
           logging.error(f"⚠️ Failed to write log: {e}")
+      finally:
+          db.close()
