@@ -10,6 +10,7 @@ from dotenv import load_dotenv
 from sqlalchemy import text
 
 from app.db.database import SessionLocal
+from app.services.BusinessCalendarService import BusinessCalendarService
 from app.services.InterBankingService import InterBankingService
 from app.bank_codes import codes
 
@@ -128,9 +129,16 @@ def find_trx_by_fingerprint(document_fingerprint, current_trx_id):
         db.close()
 
 
-def match_trx_with_ib(trx, ib_movements, bank_number, account_number):
+def match_trx_with_ib(
+    trx,
+    ib_movements,
+    bank_number,
+    account_number,
+    valid_movement_dates=None,
+):
     trx_amount = normalize_amount(trx["trx_amount"])
     trx_date = trx["trx_date"].date()
+    valid_movement_dates = set(valid_movement_dates or [trx_date])
     duplicated_match = None
 
     for mov in ib_movements:
@@ -141,16 +149,16 @@ def match_trx_with_ib(trx, ib_movements, bank_number, account_number):
         mov_type = mov.get("debit_credit_type")
 
         amount_matches = abs(trx_amount) == abs(mov_amount)
-        date_matches = trx_date == mov_date
+        date_matches = mov_date in valid_movement_dates
         type_matches = mov_type == "C"
 
         if amount_matches or date_matches:
             logger.info(
-                "[IB CANDIDATE] trx_amount=%s mov_amount=%s amount_match=%s trx_date=%s mov_date=%s date_match=%s type=%s",
+                "[IB CANDIDATE] trx_amount=%s mov_amount=%s amount_match=%s valid_dates=%s mov_date=%s date_match=%s type=%s",
                 trx_amount,
                 mov_amount,
                 amount_matches,
-                trx_date,
+                sorted(valid_movement_dates),
                 mov_date,
                 date_matches,
                 mov_type,
@@ -333,6 +341,7 @@ async def run() -> None:
     logger.info("======================================================================")
 
     ib_service = InterBankingService()
+    business_calendar = BusinessCalendarService()
 
     accounts_model = await ib_service.get_accounts()
     accounts = accounts_model.get("accounts", [])
@@ -402,10 +411,14 @@ async def run() -> None:
                 account_cbu,
             )
 
-            trx_date_since = (trx_date - datetime.timedelta(days=1)).isoformat()
-            trx_date_until = (trx_date + datetime.timedelta(days=1)).isoformat()
-
             try:
+                settlement_date = await business_calendar.get_settlement_date(trx_date)
+                valid_movement_dates = {trx_date, settlement_date}
+                trx_date_since = (trx_date - datetime.timedelta(days=1)).isoformat()
+                trx_date_until = (
+                    settlement_date + datetime.timedelta(days=1)
+                ).isoformat()
+
                 # buscar movimientos en interbanking con ese rango de fecha, monto y tipo de movimiento (credito/debito)
                 ib_movements_result = await ib_service.get_movement(
                     account_number=account_number,
@@ -417,11 +430,12 @@ async def run() -> None:
                 movements = ib_movements_result.get("movements_detail", [])
 
                 logger.info(
-                    "[IB FETCH] trx_id=%s movements=%s range_start=%s range_end=%s",
+                    "[IB FETCH] trx_id=%s movements=%s range_start=%s range_end=%s valid_dates=%s",
                     trx_id,
                     len(movements),
                     trx_date_since,
                     trx_date_until,
+                    sorted(valid_movement_dates),
                 )
 
                 matched_result = match_trx_with_ib(
@@ -429,6 +443,7 @@ async def run() -> None:
                     movements,
                     bank_number=bank_number,
                     account_number=account_number,
+                    valid_movement_dates=valid_movement_dates,
                 )
 
                 if matched_result:
