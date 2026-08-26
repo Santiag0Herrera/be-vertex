@@ -12,7 +12,7 @@ Authentication and user token management endpoints.
   Registers a new user.
 
 - **POST /auth/token**  
-  Authenticates a user and returns a JWT token.
+  Authenticates an internal user by email or a client by CUIT and returns a JWT token.
 
 - **GET /auth/me**  
   Returns the currently authenticated user's details.
@@ -117,3 +117,21 @@ Bank transaction and payment endpoints.
 - **DELETE /transactions/{transaction_id}**  
   Deletes a transaction.
 
+- **GET /trx/all_by_client**
+  Lists only the authenticated client's transactions.
+
+---
+
+## 💰 `balance.py`
+
+- **GET /balance/all**
+  Lists the balances for all clients belonging to an internal user's entity.
+
+- **GET /balance/detail?account_id={id}**
+  Returns balance details and movements for an internal user's entity.
+
+- **GET /balance/client/all**
+  Lists only the authenticated client's balances.
+
+- **GET /balance/client/detail?account_id={id}**
+  Returns a balance and its movements only when it belongs to the authenticated client.
