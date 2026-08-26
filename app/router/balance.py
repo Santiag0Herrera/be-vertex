@@ -29,6 +29,22 @@ async def get_balance_by_client_id(db: db_dependency, user: user_dependency, acc
   return balance_model
 
 
+@router.get("/client/all", status_code=status.HTTP_200_OK)
+async def get_authenticated_client_balances(db: db_dependency, user: user_dependency):
+  db_service = DBService(db=db, req_user=user)
+  return db_service.balance.get_client_balances()
+
+
+@router.get("/client/detail", status_code=status.HTTP_200_OK)
+async def get_authenticated_client_balance_movements(
+  db: db_dependency,
+  user: user_dependency,
+  account_id: int
+):
+  db_service = DBService(db=db, req_user=user)
+  return db_service.balance.get_client_balance_movements(account_id=account_id)
+
+
 @router.post("/create")
 async def create_new_balance_account(
   db: db_dependency, 

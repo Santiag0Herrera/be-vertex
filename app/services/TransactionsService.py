@@ -266,6 +266,9 @@ class TransactionsService:
         status=None,
     ):
 
+        if self.req_user.get("account_type") != "client":
+            self.error.raise_forbidden("Este endpoint es exclusivo para clientes.")
+
         page = max(int(page or 0), 0)
         recordsPerPage = max(int(recordsPerPage or 10), 1)
         offset = page * recordsPerPage

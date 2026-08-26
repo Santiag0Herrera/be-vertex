@@ -58,6 +58,103 @@ class CustomerBalanceService:
     return balances_model
 
 
+  def get_client_balances(self):
+    self._require_client()
+    balances = (
+      self.db.query(CustomersBalance)
+      .join(CustomersBalance.client)
+      .join(CustomersBalance.currency)
+      .filter(
+        CustomersBalance.client_id == self.req_user.get("id"),
+        CustomersBalance.enabled == True,
+        Clients.enabled == True
+      )
+      .options(joinedload(CustomersBalance.currency))
+      .all()
+    )
+    return self.success.response([
+      self._serialize_client_balance(balance)
+      for balance in balances
+    ])
+
+
+  def get_client_balance_movements(self, account_id: int):
+    self._require_client()
+    balance_model = (
+      self.db.query(CustomersBalance)
+      .join(CustomersBalance.client)
+      .filter(
+        CustomersBalance.id == account_id,
+        CustomersBalance.client_id == self.req_user.get("id"),
+        CustomersBalance.enabled == True,
+        Clients.enabled == True
+      )
+      .options(joinedload(CustomersBalance.currency))
+      .first()
+    )
+    if balance_model is None:
+      self.error.raise_not_found("Balance")
+
+    return self.success.response({
+      "balance": self._serialize_client_balance(balance_model),
+      "movements": self._get_movements(balance_model)
+    })
+
+
+  def _require_client(self):
+    if self.req_user.get("account_type") != "client":
+      self.error.raise_forbidden("Este endpoint es exclusivo para clientes.")
+
+
+  @staticmethod
+  def _serialize_client_balance(balance):
+    return {
+      "id": balance.id,
+      "balance_amount": balance.balance_amount,
+      "last_update": balance.last_update,
+      "currency": {
+        "id": balance.currency.id,
+        "name": balance.currency.name
+      } if balance.currency else None
+    }
+
+
+  def _get_movements(self, balance_model):
+    trxs = self.db.query(Trx).filter(
+      Trx.account_id == balance_model.id,
+      Trx.status == "conciliado"
+    ).all()
+    payments = self.db.query(Payments).filter(
+      Payments.customer_balance_id == balance_model.id
+    ).all()
+    fee_withdrawals = self.db.query(FeeWithdrawals).filter(
+      FeeWithdrawals.customer_balance_id == balance_model.id
+    ).all()
+
+    combined = [{
+      "type": "Transaccion",
+      "amount": f"{balance_model.currency.name} {trx.amount}",
+      "fee_amount": trx.fee_amount,
+      "net_amount": trx.amount - (trx.fee_amount or 0),
+      "date": trx.date,
+      "status": trx.status,
+    } for trx in trxs]
+    combined.extend({
+      "type": "Pago",
+      "amount": f"{balance_model.currency.name} {payment.amount}",
+      "date": payment.date,
+      "status": payment.status
+    } for payment in payments)
+    combined.extend({
+      "type": "Retiro de comision",
+      "amount": f"{balance_model.currency.name} {withdrawal.amount}",
+      "date": withdrawal.date,
+      "status": withdrawal.status
+    } for withdrawal in fee_withdrawals)
+    combined.sort(key=lambda movement: movement["date"], reverse=True)
+    return combined
+
+
   def get_all_movements(self, account_id: int):
     balance_model = (
       self.db.query(CustomersBalance)

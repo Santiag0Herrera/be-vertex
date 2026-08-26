@@ -21,3 +21,4 @@ class ReqUser:
   perm_id: int
   hierarchy: int
   entity_id: int
+  account_type: str

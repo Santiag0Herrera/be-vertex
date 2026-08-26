@@ -8,6 +8,7 @@ from starlette import status
 from jose import jwt, JWTError
 from passlib.context import CryptContext
 from fastapi.security import OAuth2PasswordBearer
+import re
 
 SECRET_KEY = 'bf75bf97eb8839552b6d64790c35fdecbe8874bd1791917b650494d3d54c60b5'
 ALGORITHM = 'HS256'
@@ -16,11 +17,20 @@ bcrypt_context = CryptContext(schemes=['bcrypt'], deprecated='auto')
 db_dependency = Annotated[Session, Depends(get_db)]
 oauth2_bearer = OAuth2PasswordBearer(tokenUrl='auth/token')
 
-def authenticate_user(email: str, password: str, db):
-  normalized_email = email.lower()
-  user = db.query(Clients).filter(Clients.email == normalized_email).first()
+def authenticate_user(identifier: str, password: str, db):
+  normalized_identifier = identifier.strip().lower()
+  normalized_cuit = re.sub(r"\D", "", normalized_identifier)
+  user = None
+  if len(normalized_cuit) == 11:
+    user = db.query(Clients).filter(
+      Clients.cuit == normalized_cuit,
+      Clients.enabled == True
+    ).first()
   if not user:
-    user = db.query(Users).filter(Users.email == normalized_email).first()
+    user = db.query(Users).filter(
+      Users.email == normalized_identifier,
+      Users.enabled == True
+    ).first()
   if not user:
     return False
   if not bcrypt_context.verify(password, user.hashed_password):
@@ -28,7 +38,7 @@ def authenticate_user(email: str, password: str, db):
   return user
 
 
-def create_token(email: str, user_id: int, permission_level: str, perm_id: int, hierarchy: int, entity_id: int, expires_delta: timedelta, db: db_dependency):
+def create_token(email: str, user_id: int, permission_level: str, perm_id: int, hierarchy: int, entity_id: int, account_type: str, expires_delta: timedelta, db: db_dependency):
   entity = db.query(Entity).filter(Entity.id == entity_id).first()
   # NO TOKEN WILL BE GENERATED IF ENTIY IS NOT ENABLED
   if entity.status != 'enabled':
@@ -40,7 +50,8 @@ def create_token(email: str, user_id: int, permission_level: str, perm_id: int, 
       'perm': permission_level,
       'perm_id': perm_id,
       'hierarchy': hierarchy,
-      'entity_id': entity_id
+      'entity_id': entity_id,
+      'account_type': account_type
   }
   expires = datetime.now(timezone.utc) + expires_delta
   encode.update({'exp': expires})
@@ -56,6 +67,7 @@ async def get_current_user(token: Annotated[str, Depends(oauth2_bearer)]):
     user_perm_id: str = payload.get('perm_id')
     hierarchy: str = payload.get('hierarchy')
     entity_id: str = payload.get('entity_id')
+    account_type: str = payload.get('account_type')
     if email is None or user_id is None:
       raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='Invalid Credentials') 
     return {
@@ -64,7 +76,8 @@ async def get_current_user(token: Annotated[str, Depends(oauth2_bearer)]):
       'user_perm': user_perm, 
       'hierarchy': hierarchy, 
       'entity_id': entity_id, 
-      'user_perm_id': user_perm_id
+      'user_perm_id': user_perm_id,
+      'account_type': account_type
     }
   except JWTError:
     raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='Invalid Credentials')
