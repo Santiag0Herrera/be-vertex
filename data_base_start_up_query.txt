@@ -99,6 +99,7 @@ CREATE TABLE endpoints (
 -- 10) Transacciones (depende de entities, clients)
 CREATE TABLE trx (
     id SERIAL PRIMARY KEY,
+    document_name VARCHAR(255),
     trx_id VARCHAR(255) UNIQUE,
     emisor_cbu VARCHAR(255),
     emisor_name VARCHAR(255) NOT NULL,

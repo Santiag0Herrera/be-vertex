@@ -55,18 +55,20 @@ async def get_all_transactions(
     client: Optional[str] = Query(None),
     account_id: Optional[int] = Query(None),
     client_id: Optional[int] = Query(None),
+    document_name: Optional[str] = Query(None),
 ):
     db_service = DBService(db=db, req_user=user)
     transactions_model = db_service.trx.get_all(
-        page,
-        recordsPerPage,
-        dateFrom,
-        dateTo,
-        status,
-        account,
-        client,
-        account_id,
-        client_id,
+        page=page,
+        recordsPerPage=recordsPerPage,
+        dateFrom=dateFrom,
+        dateTo=dateTo,
+        status=status,
+        account=account,
+        client=client,
+        account_id=account_id,
+        client_id=client_id,
+        document_name=document_name,
     )
     return transactions_model
 

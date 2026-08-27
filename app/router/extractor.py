@@ -1053,11 +1053,15 @@ async def analyze_document(
         return DocumentExtractResponse(
             ok=False,
             document=None,
-            partial={},
+            partial={"document_name": file.filename or "unnamed"},
             missing=[],
             errors=[ParseIssue(field="*", message="No fields extracted from Textract response")],
             raw_fields=[],
         )
 
     # Construcción tolerante (no rompe FE)
-    return build_document_response(fields)
+    result = build_document_response(fields)
+    result.partial["document_name"] = file.filename or "unnamed"
+    if result.document:
+        result.document.document_name = file.filename or "unnamed"
+    return result

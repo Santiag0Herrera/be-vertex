@@ -85,6 +85,7 @@ class Trx(Base):
     __tablename__ = "trx"
 
     document_fingerprint = Column(String, nullable=True, index=True)
+    document_name = Column(String, nullable=True)
     id = Column(Integer, primary_key=True, index=True)
     trx_id = Column(String, unique=True)
     emisor_cbu = Column(String, nullable=True)

@@ -100,7 +100,8 @@ def parse_date(raw: str) -> datetime:
     value = re.sub(r"\s+", " ", value)
 
     long_match = re.search(
-        r"(\d{1,2}) de ([a-záéíóú]+) de (\d{4})(?:\s*(?:-|a|a las|las)?\s*(\d{1,2}):(\d{2})(?::(\d{2}))?)?",
+        r"(\d{1,2})\s+(?:de\s+)?([a-záéíóú]+)\s+(?:de\s+)?(\d{4})"
+        r"(?:\s*(?:-|a|a las|las)?\s*(\d{1,2}):(\d{2})(?::(\d{2}))?\s*h?s?)?",
         value,
     )
     if long_match:

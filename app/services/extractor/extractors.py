@@ -144,6 +144,15 @@ def extract_fields_from_wallet_lines(response: Dict[str, Any]) -> List[Extracted
         r"\d{1,2}[/-][A-Za-záéíóú]{3,}[/-]\d{2,4}(?:\s*-\s*\d{1,2}:\d{2}(?::\d{2})?\s*h?)?",
         re.IGNORECASE,
     )
+    datetime_numeric = re.compile(
+        r"\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}(?:\s+\d{1,2}:\d{2}(?::\d{2})?)?\b",
+        re.IGNORECASE,
+    )
+    datetime_text_month = re.compile(
+        r"\b\d{1,2}\s+(?:de\s+)?[A-Za-záéíóú]+\s+(?:de\s+)?\d{4}"
+        r"(?:\s+\d{1,2}:\d{2}(?::\d{2})?\s*h?s?)?\b",
+        re.IGNORECASE,
+    )
 
     for line in lines:
         normalized_line = line.lower()
@@ -154,7 +163,12 @@ def extract_fields_from_wallet_lines(response: Dict[str, Any]) -> List[Extracted
                 fields.append(ExtractedField(key="monto", value=amount_match.group()))
                 break
 
-        date_match = datetime_long.search(line) or datetime_short_month.search(line)
+        date_match = (
+            datetime_numeric.search(line)
+            or datetime_long.search(line)
+            or datetime_short_month.search(line)
+            or datetime_text_month.search(line)
+        )
         if date_match:
             fields.append(ExtractedField(key="fecha", value=date_match.group()))
 

@@ -88,6 +88,7 @@ class TransactionsService:
         client=None,
         account_id=None,
         client_id=None,
+        document_name=None,
     ):
         user_model = (
             self.db.query(Users).filter(Users.id == self.req_user.get("id")).first()
@@ -144,6 +145,11 @@ class TransactionsService:
         if client_id:
             base_query = base_query.filter(CustomersBalance.client_id == client_id)
 
+        if document_name and document_name.strip():
+            base_query = base_query.filter(
+                Trx.document_name.ilike(f"%{document_name.strip()}%")
+            )
+
         total_records = base_query.count()
 
         transactions_model = (
@@ -169,8 +175,8 @@ class TransactionsService:
     def create(self, document_request: DocumentRequest, user: dict):
         account_model = self.db.query(CustomersBalance).filter(
             CustomersBalance.id == document_request.account_id
-        )
-        self.error.raise_if_none(account_model, "Clinet Account")
+        ).first()
+        self.error.raise_if_none(account_model, "Client Account")
 
         cbu_model = (
             self.db.query(CBU)
@@ -182,7 +188,8 @@ class TransactionsService:
         trx_exists_model = (
             self.db.query(Trx).filter(Trx.trx_id == document_request.trx_id).first()
         )
-        self.error.raise_if_none(trx_exists_model)
+        if trx_exists_model:
+            self.error.raise_conflict("Transaction already exists")
 
         entity_model = (
             self.db.query(Entity)
@@ -195,14 +202,16 @@ class TransactionsService:
         )
 
         create_user_model = Trx(
+            document_name=document_request.document_name,
             emisor_cbu=document_request.emisor_cbu,
             emisor_name=document_request.emisor_name,
             emisor_cuit=document_request.emisor_cuit,
             receptor_cbu=cbu_model.nro,
             entity_id=entity_model.id,
+            client_id=account_model.client_id,
             amount=document_request.amount,
             date=document_request.date,
-            creation_date=datetime.utcnow(),
+            creation_date=datetime.datetime.utcnow(),
             trx_id=document_request.trx_id,
             account_id=document_request.account_id,
             status="pendiente",
@@ -233,6 +242,7 @@ class TransactionsService:
             emisor_cuit = "-"
             emisor_cbu = doc.emisor_cbu or receptor_account_number
             trx_model = Trx(
+                document_name=doc.document_name or multiple_trx_request.document_name,
                 emisor_cbu=emisor_cbu,
                 emisor_name=emisor_name,
                 emisor_cuit=emisor_cuit,

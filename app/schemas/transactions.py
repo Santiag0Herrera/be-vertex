@@ -3,6 +3,7 @@ from datetime import date as dt_date, datetime
 from typing import Optional
 
 class DocumentRequest(BaseModel):
+  document_name: Optional[str] = None
   amount: float = Field(..., gt=0, description="Transaction amount, must be greater than 0")
   trx_id: Optional[str] = None
   emisor_name: Optional[str] = None
@@ -38,6 +39,7 @@ class MultipleDocumentRequest(BaseModel):
   transactions: list[DocumentRequest]
   account_id: int
   owner_account_number: str
+  document_name: Optional[str] = None
 
 class UploadDocumentRequest(BaseModel):
   base64: str

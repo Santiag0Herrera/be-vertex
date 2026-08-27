@@ -85,7 +85,7 @@ async def extract_document_from_file(
 
         textract_result = build_document_response(fields)
         if textract_result.ok:
-            return textract_result
+            return attach_document_name(textract_result, filename)
 
         gemini_fields = await recover_missing_fields(
             original_data=original_data,
@@ -94,11 +94,10 @@ async def extract_document_from_file(
             request_id=request_id,
         )
         if not gemini_fields:
-            return textract_result
+            return attach_document_name(textract_result, filename)
 
-        return build_document_response(
-            merge_and_dedup_fields(fields, gemini_fields)
-        )
+        result = build_document_response(merge_and_dedup_fields(fields, gemini_fields))
+        return attach_document_name(result, filename)
     except HTTPException as exc:
         outcome = f"http_{exc.status_code}"
         raise
@@ -129,6 +128,17 @@ def validate_file_metadata(file: UploadFile) -> None:
             status_code=400,
             detail=f"Unsupported content_type '{file.content_type}'. Allowed: {sorted(ALLOWED_CONTENT_TYPES)}",
         )
+
+
+def attach_document_name(
+    result: DocumentExtractResponse,
+    filename: str | None,
+) -> DocumentExtractResponse:
+    document_name = filename or "unnamed"
+    result.partial["document_name"] = document_name
+    if result.document:
+        result.document.document_name = document_name
+    return result
 
 
 def validate_file_data(data: bytes) -> None:
