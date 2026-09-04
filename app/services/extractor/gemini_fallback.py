@@ -53,9 +53,14 @@ async def recover_missing_fields(
         )
     except GeminiFallbackError as exc:
         logger.warning(
-            "Gemini fallback failed request_id=%s error=%s",
+            "Gemini fallback failed request_id=%s reason=%s status_code=%s "
+            "retry_after=%s model=%s requested_fields=%s",
             request_id,
-            exc,
+            exc.reason,
+            exc.status_code or "none",
+            exc.retry_after or "none",
+            exc.model or "unknown",
+            sorted(recoverable_fields),
         )
         textract_result.errors.append(
             ParseIssue(field="gemini", message="Unable to recover missing fields")

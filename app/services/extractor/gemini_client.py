@@ -4,6 +4,7 @@ import base64
 import json
 import logging
 import os
+import re
 from typing import Any
 
 import httpx
@@ -18,7 +19,19 @@ logger = logging.getLogger(__name__)
 
 
 class GeminiFallbackError(Exception):
-    pass
+    def __init__(
+        self,
+        reason: str,
+        *,
+        status_code: int | None = None,
+        retry_after: str | None = None,
+        model: str | None = None,
+    ) -> None:
+        self.reason = reason
+        self.status_code = status_code
+        self.retry_after = retry_after
+        self.model = model
+        super().__init__(reason)
 
 
 def is_gemini_configured() -> bool:
@@ -34,7 +47,7 @@ async def extract_document_fields(
 ) -> GeminiDocumentFields:
     api_key = os.getenv("GEMINI_API_KEY")
     if not api_key:
-        raise GeminiFallbackError("GEMINI_API_KEY is not configured")
+        raise GeminiFallbackError("not_configured")
 
     model = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
     timeout_seconds = max(
@@ -79,20 +92,16 @@ async def extract_document_fields(
             )
             response.raise_for_status()
     except httpx.TimeoutException as exc:
-        raise GeminiFallbackError("Gemini request timed out") from exc
+        raise GeminiFallbackError("timeout", model=model) from exc
     except httpx.HTTPStatusError as exc:
-        error_detail = get_google_error_detail(exc.response)
-        logger.error(
-            "Gemini rejected request request_id=%s status_code=%s detail=%s",
-            request_id,
-            exc.response.status_code,
-            error_detail,
-        )
         raise GeminiFallbackError(
-            f"Gemini rejected the request ({exc.response.status_code}): {error_detail}"
+            classify_google_error(exc.response),
+            status_code=exc.response.status_code,
+            retry_after=get_retry_after(exc.response),
+            model=model,
         ) from exc
     except httpx.HTTPError as exc:
-        raise GeminiFallbackError("Unable to connect to Gemini") from exc
+        raise GeminiFallbackError("connection_error", model=model) from exc
 
     try:
         response_data = response.json()
@@ -100,7 +109,7 @@ async def extract_document_fields(
         output_text = "".join(part.get("text", "") for part in parts)
         return GeminiDocumentFields.model_validate_json(output_text)
     except (KeyError, IndexError, TypeError, ValueError) as exc:
-        raise GeminiFallbackError("Gemini returned an invalid structured response") from exc
+        raise GeminiFallbackError("invalid_response", model=model) from exc
 
 
 def build_prompt(partial: dict[str, Any], required_fields: set[str]) -> str:
@@ -117,10 +126,47 @@ def build_prompt(partial: dict[str, Any], required_fields: set[str]) -> str:
     )
 
 
-def get_google_error_detail(response: httpx.Response) -> str:
+def get_google_error_message(response: httpx.Response) -> str:
     try:
         detail = response.json().get("error", {}).get("message")
     except ValueError:
         detail = None
 
-    return str(detail or "No error detail returned")[:500]
+    return " ".join(str(detail or "").split())
+
+
+def classify_google_error(response: httpx.Response) -> str:
+    status_code = response.status_code
+    message = get_google_error_message(response).lower()
+
+    if status_code == 429:
+        return "quota_exceeded" if "quota" in message else "rate_limited"
+    if status_code in {401, 403}:
+        return "authentication_error"
+    if status_code == 400:
+        return "invalid_request"
+    if status_code >= 500:
+        return "provider_error"
+    return "http_error"
+
+
+def get_retry_after(response: httpx.Response) -> str | None:
+    header_value = response.headers.get("Retry-After")
+    if header_value:
+        return header_value
+
+    try:
+        error_details = response.json().get("error", {}).get("details", [])
+    except ValueError:
+        error_details = []
+
+    for detail in error_details:
+        if isinstance(detail, dict) and detail.get("retryDelay"):
+            return str(detail["retryDelay"])
+
+    match = re.search(
+        r"retry in\s+([0-9]+(?:\.[0-9]+)?s)",
+        get_google_error_message(response),
+        re.IGNORECASE,
+    )
+    return match.group(1) if match else None

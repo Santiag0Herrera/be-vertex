@@ -1,5 +1,10 @@
--- 1) Productos
-CREATE TABLE products (
+-- Esquema inicial de Vertex para PostgreSQL.
+-- Crea una base NUEVA de acuerdo con app/models.py.
+-- IF NOT EXISTS no actualiza tablas existentes; para eso se requieren migraciones.
+
+BEGIN;
+
+CREATE TABLE IF NOT EXISTS products (
     id SERIAL PRIMARY KEY,
     name VARCHAR(255) NOT NULL,
     description VARCHAR(255) NOT NULL,
@@ -7,22 +12,19 @@ CREATE TABLE products (
     path VARCHAR(255) NOT NULL
 );
 
--- 2) Moneda
-CREATE TABLE currency (
+CREATE TABLE IF NOT EXISTS currency (
     id SERIAL PRIMARY KEY,
     name VARCHAR(255) NOT NULL
 );
 
--- 3) Permisos (depende de products)
-CREATE TABLE permissions (
+CREATE TABLE IF NOT EXISTS permissions (
     id SERIAL PRIMARY KEY,
     product INTEGER REFERENCES products(id),
     level VARCHAR(255) NOT NULL,
     hierarchy INTEGER NOT NULL
 );
 
--- 4) CBU
-CREATE TABLE cbus (
+CREATE TABLE IF NOT EXISTS cbus (
     id SERIAL PRIMARY KEY,
     nro VARCHAR(255) UNIQUE NOT NULL,
     banco VARCHAR(255) NOT NULL,
@@ -30,19 +32,23 @@ CREATE TABLE cbus (
     cuit VARCHAR(255) NOT NULL
 );
 
--- 5) Entidades (depende de cbus)
-CREATE TABLE entities (
+CREATE TABLE IF NOT EXISTS entities (
     id SERIAL PRIMARY KEY,
     name VARCHAR(255) NOT NULL,
     mail VARCHAR(255) NOT NULL,
     phone VARCHAR(255),
     products VARCHAR(255),
-    status VARCHAR(255),
-    cbu_id INTEGER REFERENCES cbus(id)
+    status VARCHAR(255)
 );
 
--- 6) Usuarios (depende de permissions, entities)
-CREATE TABLE users (
+CREATE TABLE IF NOT EXISTS entities_cbus (
+    id SERIAL PRIMARY KEY,
+    entity_id INTEGER NOT NULL REFERENCES entities(id),
+    cbu_id INTEGER NOT NULL REFERENCES cbus(id),
+    currency_id INTEGER NOT NULL REFERENCES currency(id)
+);
+
+CREATE TABLE IF NOT EXISTS users (
     id SERIAL PRIMARY KEY,
     first_name VARCHAR(255) NOT NULL,
     last_name VARCHAR(255) NOT NULL,
@@ -50,55 +56,54 @@ CREATE TABLE users (
     hashed_password VARCHAR(255) NOT NULL,
     phone VARCHAR(255),
     perm_id INTEGER REFERENCES permissions(id),
-    entity_id INTEGER REFERENCES entities(id)
+    entity_id INTEGER REFERENCES entities(id),
+    enabled BOOLEAN NOT NULL DEFAULT TRUE
 );
 
--- 7) Clientes (depende de permissions, entities)
-CREATE TABLE clients (
+CREATE TABLE IF NOT EXISTS clients (
     id SERIAL PRIMARY KEY,
     first_name VARCHAR(255) NOT NULL,
     last_name VARCHAR(255) NOT NULL,
     email VARCHAR(255) UNIQUE NOT NULL,
-    cuit VARCHAR(11) NOT NULL CHECK (cuit ~ '^[0-9]{11}$'),
+    cuit VARCHAR(11) CHECK (cuit IS NULL OR cuit ~ '^[0-9]{11}$'),
     hashed_password VARCHAR(255) NOT NULL,
     phone VARCHAR(255),
     perm_id INTEGER NOT NULL REFERENCES permissions(id),
-    entity_id INTEGER NOT NULL REFERENCES entities(id)
+    entity_id INTEGER NOT NULL REFERENCES entities(id),
+    enabled BOOLEAN NOT NULL DEFAULT TRUE
 );
 
--- 8) Saldos por cliente (depende de clients, currency)
-CREATE TABLE customers_balance (
+CREATE TABLE IF NOT EXISTS customers_balance (
     id SERIAL PRIMARY KEY,
     client_id INTEGER UNIQUE NOT NULL REFERENCES clients(id),
     balance_amount DOUBLE PRECISION NOT NULL DEFAULT 0.0,
     fee_amount DOUBLE PRECISION NOT NULL DEFAULT 0.0,
     balance_currency_id INTEGER NOT NULL REFERENCES currency(id),
-    last_update TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    last_update TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
     fee_percentage DOUBLE PRECISION NOT NULL DEFAULT 0.0,
     enabled BOOLEAN NOT NULL DEFAULT TRUE
 );
 
-CREATE TABLE fee_withdrawals (
+CREATE TABLE IF NOT EXISTS fee_withdrawals (
     id SERIAL PRIMARY KEY,
     customer_balance_id INTEGER NOT NULL REFERENCES customers_balance(id),
     withdrawn_by_user_id INTEGER NOT NULL REFERENCES users(id),
     entity_id INTEGER NOT NULL REFERENCES entities(id),
     currency_id INTEGER NOT NULL REFERENCES currency(id),
     amount DOUBLE PRECISION NOT NULL CHECK (amount > 0),
-    date TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    date TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
     status VARCHAR(255) NOT NULL DEFAULT 'consolidado'
 );
 
--- 9) Endpoints (depende de permissions)
-CREATE TABLE endpoints (
+CREATE TABLE IF NOT EXISTS endpoints (
     id SERIAL PRIMARY KEY,
     path VARCHAR(255) UNIQUE NOT NULL,
     perm_id INTEGER REFERENCES permissions(id)
 );
 
--- 10) Transacciones (depende de entities, clients)
-CREATE TABLE trx (
+CREATE TABLE IF NOT EXISTS trx (
     id SERIAL PRIMARY KEY,
+    document_fingerprint VARCHAR(255),
     document_name VARCHAR(255),
     trx_id VARCHAR(255) UNIQUE,
     emisor_cbu VARCHAR(255),
@@ -108,21 +113,26 @@ CREATE TABLE trx (
     entity_id INTEGER REFERENCES entities(id),
     client_id INTEGER REFERENCES clients(id),
     amount DOUBLE PRECISION NOT NULL,
-    date VARCHAR(255) NOT NULL,
-    status VARCHAR(255) NOT NULL
+    date TIMESTAMP WITHOUT TIME ZONE NOT NULL,
+    creation_date TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    status VARCHAR(255) NOT NULL,
+    account_id INTEGER NOT NULL REFERENCES customers_balance(id),
+    applied_fee_percentage DOUBLE PRECISION,
+    fee_amount DOUBLE PRECISION
 );
 
--- 11) Pagos (depende de users)
-CREATE TABLE payments (
+CREATE TABLE IF NOT EXISTS payments (
     id SERIAL PRIMARY KEY,
     payee_user_id INTEGER REFERENCES users(id),
     amount DOUBLE PRECISION NOT NULL,
-    date TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    status VARCHAR(255) NOT NULL
+    date TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    status VARCHAR(255) NOT NULL,
+    customer_balance_id INTEGER REFERENCES customers_balance(id),
+    currency_id INTEGER REFERENCES currency(id),
+    entity_id INTEGER NOT NULL REFERENCES entities(id)
 );
 
--- 12) Logs
-CREATE TABLE logs (
+CREATE TABLE IF NOT EXISTS logs (
     id SERIAL PRIMARY KEY,
     datetime VARCHAR(255) NOT NULL,
     endpoint VARCHAR(255) NOT NULL,
@@ -130,23 +140,27 @@ CREATE TABLE logs (
     username VARCHAR(255) NOT NULL
 );
 
--- (Opcional) Índices útiles en FKs para performance
-CREATE INDEX idx_users_perm_id ON users(perm_id);
-CREATE INDEX idx_users_entity_id ON users(entity_id);
+CREATE INDEX IF NOT EXISTS idx_permissions_product ON permissions(product);
+CREATE INDEX IF NOT EXISTS idx_entities_cbus_entity_id ON entities_cbus(entity_id);
+CREATE INDEX IF NOT EXISTS idx_entities_cbus_cbu_id ON entities_cbus(cbu_id);
+CREATE INDEX IF NOT EXISTS idx_entities_cbus_currency_id ON entities_cbus(currency_id);
+CREATE INDEX IF NOT EXISTS idx_users_perm_id ON users(perm_id);
+CREATE INDEX IF NOT EXISTS idx_users_entity_id ON users(entity_id);
+CREATE INDEX IF NOT EXISTS idx_clients_perm_id ON clients(perm_id);
+CREATE INDEX IF NOT EXISTS idx_clients_entity_id ON clients(entity_id);
+CREATE INDEX IF NOT EXISTS idx_customers_balance_currency_id ON customers_balance(balance_currency_id);
+CREATE INDEX IF NOT EXISTS idx_fee_withdrawals_balance_id ON fee_withdrawals(customer_balance_id);
+CREATE INDEX IF NOT EXISTS idx_fee_withdrawals_user_id ON fee_withdrawals(withdrawn_by_user_id);
+CREATE INDEX IF NOT EXISTS idx_fee_withdrawals_entity_id ON fee_withdrawals(entity_id);
+CREATE INDEX IF NOT EXISTS idx_fee_withdrawals_currency_id ON fee_withdrawals(currency_id);
+CREATE INDEX IF NOT EXISTS idx_endpoints_perm_id ON endpoints(perm_id);
+CREATE INDEX IF NOT EXISTS idx_trx_document_fingerprint ON trx(document_fingerprint);
+CREATE INDEX IF NOT EXISTS idx_trx_entity_id ON trx(entity_id);
+CREATE INDEX IF NOT EXISTS idx_trx_client_id ON trx(client_id);
+CREATE INDEX IF NOT EXISTS idx_trx_account_id ON trx(account_id);
+CREATE INDEX IF NOT EXISTS idx_payments_payee_user_id ON payments(payee_user_id);
+CREATE INDEX IF NOT EXISTS idx_payments_customer_balance_id ON payments(customer_balance_id);
+CREATE INDEX IF NOT EXISTS idx_payments_currency_id ON payments(currency_id);
+CREATE INDEX IF NOT EXISTS idx_payments_entity_id ON payments(entity_id);
 
-CREATE INDEX idx_clients_perm_id ON clients(perm_id);
-CREATE INDEX idx_clients_entity_id ON clients(entity_id);
-
-CREATE INDEX idx_entities_cbu_id ON entities(cbu_id);
-
-CREATE INDEX idx_customers_balance_client_id ON customers_balance(client_id);
-CREATE INDEX idx_customers_balance_currency_id ON customers_balance(balance_currency_id);
-CREATE INDEX idx_fee_withdrawals_balance_id ON fee_withdrawals(customer_balance_id);
-CREATE INDEX idx_fee_withdrawals_entity_id ON fee_withdrawals(entity_id);
-
-CREATE INDEX idx_endpoints_perm_id ON endpoints(perm_id);
-
-CREATE INDEX idx_trx_entity_id ON trx(entity_id);
-CREATE INDEX idx_trx_client_id ON trx(client_id);
-
-CREATE INDEX idx_payments_payee_user_id ON payments(payee_user_id);
+COMMIT;
