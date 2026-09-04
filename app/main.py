@@ -1,6 +1,19 @@
+import os
+
+from dotenv import load_dotenv
+
+load_dotenv(dotenv_path="dev.env")
+
+from app.logging_config import configure_logging
+
+configure_logging()
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+
 from app.db.database import create_tables
+from app.middlewares.PermissionMiddleware import PermissionMiddleware
+from app.middlewares.RequestLoggingMiddleware import RequestLoggingMiddleware
 from app.router import (
     auth,
     transactions,
@@ -16,11 +29,7 @@ from app.router import (
     logs,
     dashboard,
 )
-from app.middlewares.PermissionMiddleware import PermissionMiddleware
-from dotenv import load_dotenv
-import os
 
-load_dotenv(dotenv_path="dev.env")  # Esto carga las variables al entorno
 ENV = os.getenv("ENVIRONMENT", "dev")
 app = FastAPI(
     docs_url="/docs" if ENV == "dev" else None,
@@ -29,6 +38,7 @@ app = FastAPI(
 )
 
 app.add_middleware(PermissionMiddleware)
+app.add_middleware(RequestLoggingMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[os.getenv("ALLOW_ORIGINS")],

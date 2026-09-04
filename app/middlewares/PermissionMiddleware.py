@@ -12,8 +12,7 @@ from app.models import Endpoints, Permission, Logs
 from datetime import datetime
 import logging
 
-# Setup básico de logging
-logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("vertex.auth")
 
 SECRET_KEY = 'bf75bf97eb8839552b6d64790c35fdecbe8874bd1791917b650494d3d54c60b5'
 ALGORITHM = "HS256"
@@ -25,8 +24,6 @@ class PermissionMiddleware(BaseHTTPMiddleware):
         try:
             path = request.url.path
             method = request.method
-            logging.info(f"🔒 Incoming request to: {path}")
-
             public_paths = ["/auth/", "/auth/token", "/docs", "/openapi.json", "/redoc"]
             if any(path.startswith(p) for p in public_paths):
                 # Log para rutas públicas (usuario anónimo)
@@ -36,13 +33,19 @@ class PermissionMiddleware(BaseHTTPMiddleware):
             # Verificar token
             auth_header = request.headers.get("Authorization")
             if not auth_header or not auth_header.startswith("Bearer "):
-                logging.warning("❌ No Authorization header")
+                logger.warning(
+                    "Authorization header missing",
+                    extra={"event": "auth_failed", "reason": "missing_header", "path": path},
+                )
                 _save_log(path, method, user="no-token")
                 return JSONResponse(status_code=HTTP_401_UNAUTHORIZED, content={"detail": "No token provided"})
 
             token = auth_header.removeprefix("Bearer ").strip()
             if not token:
-                logging.warning("❌ Empty bearer token")
+                logger.warning(
+                    "Bearer token empty",
+                    extra={"event": "auth_failed", "reason": "empty_token", "path": path},
+                )
                 _save_log(path, method, user="no-token")
                 return JSONResponse(
                     status_code=HTTP_401_UNAUTHORIZED,
@@ -50,9 +53,11 @@ class PermissionMiddleware(BaseHTTPMiddleware):
                 )
             try:
                 payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-                logging.info("✅ Token payload")
             except JWTError as e:
-                logging.error(f"❌ JWT decoding error: {e}")
+                logger.warning(
+                    "JWT validation failed",
+                    extra={"event": "auth_failed", "reason": "invalid_token", "path": path},
+                )
                 _save_log(path, method, user="invalid-token")
                 return JSONResponse(status_code=HTTP_401_UNAUTHORIZED, content={"detail": "Invalid token"})
 
@@ -78,7 +83,15 @@ class PermissionMiddleware(BaseHTTPMiddleware):
             )
 
             if not has_access:
-                logging.warning(f"⛔ Access denied for perm_id={perm_id} to path={path}")
+                logger.warning(
+                    "Permission denied",
+                    extra={
+                        "event": "auth_failed",
+                        "reason": "permission_denied",
+                        "path": path,
+                        "perm_id": perm_id,
+                    },
+                )
                 _save_log(path, method, user=f"{user_email} (denied)")
                 return JSONResponse(status_code=HTTP_403_FORBIDDEN, content={"detail": "Permission denied"})
 
@@ -90,10 +103,10 @@ class PermissionMiddleware(BaseHTTPMiddleware):
 
         except Exception as e:
             if downstream_started:
-                logging.exception("🔥 Downstream route error")
+                logger.exception("Downstream route error", extra={"event": "downstream_error"})
                 raise
 
-            logging.exception(f"🔥 Middleware error: {e}")
+            logger.exception("Permission middleware error", extra={"event": "middleware_error"})
             # Logueamos el fallo del middleware también
             try:
                 _save_log(request.url.path, request.method, user="middleware-error")
@@ -120,6 +133,6 @@ def _save_log(endpoint: str, method: str, user: str):
           db.commit()
       except Exception as e:
           # No bloqueamos la request por un error de logging
-          logging.error(f"⚠️ Failed to write log: {e}")
+          logger.exception("Failed to persist request log", extra={"event": "audit_log_failed"})
       finally:
           db.close()
