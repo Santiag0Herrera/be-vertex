@@ -468,7 +468,7 @@ async def run() -> dict:
             try:
                 settlement_date = await business_calendar.get_settlement_date(trx_date)
                 valid_movement_dates = {trx_date, settlement_date}
-                trx_date_since = (trx_date - datetime.timedelta(days=1)).isoformat()
+                trx_date_since = trx_date.isoformat()
                 trx_date_until = (
                     settlement_date + datetime.timedelta(days=1)
                 ).isoformat()

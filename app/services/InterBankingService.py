@@ -129,7 +129,7 @@ class InterBankingService:
             "Authorization": f"Bearer {self._get_bearer_token(self.token)}",
             "client_id": self.client_id,
         }
-        response = requests.get(url, headers=headers)
+        response = requests.get(url, headers=headers, params={"limit": 1000})
 
         result = self._parse_json_response(response, "Interbanking movements")
         return result
