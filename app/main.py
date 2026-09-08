@@ -22,6 +22,7 @@ from app.router import (
     products,
     clients,
     payments,
+    payment_orders,
     balance,
     currency,
     extractor,
@@ -55,6 +56,7 @@ app.include_router(entities.router)
 app.include_router(products.router)
 app.include_router(clients.router)
 app.include_router(payments.router)
+app.include_router(payment_orders.router)
 app.include_router(balance.router)
 app.include_router(currency.router)
 app.include_router(extractor.router)

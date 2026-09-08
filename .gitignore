@@ -89,3 +89,5 @@ cover/
 # Django stuff:
 *.log
 local_settings.py
+# Migración requerida para órdenes de pago
+!migrations/20260908_payment_orders.sql

@@ -1,5 +1,5 @@
 from datetime import datetime
-from sqlalchemy import Column, DateTime, Integer, String, Float, ForeignKey, Boolean
+from sqlalchemy import Column, DateTime, Integer, String, Float, ForeignKey, Boolean, Numeric, CheckConstraint
 from sqlalchemy.orm import relationship, declarative_base
 
 Base = declarative_base()
@@ -152,6 +152,8 @@ class Payments(Base):
     currency_id = Column(Integer, ForeignKey("currency.id"))
     entity_id = Column(Integer, ForeignKey("entities.id"), nullable=False)
 
+    payment_order_id = Column(Integer, ForeignKey("payment_orders.id"), nullable=True, index=True)
+
     payee_user = relationship("Users", back_populates="payments")
     customer_balance = relationship("CustomersBalance")
     currency = relationship("Currency")
@@ -222,3 +224,23 @@ class Currency(Base):
 
     balances = relationship("CustomersBalance", back_populates="currency")
     entity_cbus = relationship("EntityCBU", back_populates="currency")
+
+
+class PaymentOrders(Base):
+    __tablename__ = "payment_orders"
+    __table_args__ = (
+        CheckConstraint("amount > 0", name="payment_order_positive_amount"),
+        CheckConstraint("executed_amount >= 0 AND executed_amount <= amount", name="payment_order_execution_amount"),
+        CheckConstraint("status IN ('pendiente_aprobacion', 'parcialmente_ejecutada', 'ejecutada')", name="payment_order_status"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    client_id = Column(Integer, ForeignKey("clients.id"), nullable=False)
+    customer_balance_id = Column(Integer, ForeignKey("customers_balance.id"), nullable=False)
+    entity_id = Column(Integer, ForeignKey("entities.id"), nullable=False, index=True)
+    currency_id = Column(Integer, ForeignKey("currency.id"), nullable=False)
+    amount = Column(Numeric(10, 2), nullable=False)
+    executed_amount = Column(Numeric(10, 2), nullable=False, default=0)
+    status = Column(String, nullable=False, default="pendiente_aprobacion")
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow)
