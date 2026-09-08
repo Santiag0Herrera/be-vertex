@@ -1,5 +1,6 @@
 from .ErrorService import ErrorService
 from .SuccessService import SuccessService
+from sqlalchemy import Float, func, literal, select, union_all
 from sqlalchemy.orm import Session
 from app.models import CustomersBalance, Clients, FeeWithdrawals, Payments, Trx, Users
 from sqlalchemy.orm import joinedload
@@ -78,7 +79,12 @@ class CustomerBalanceService:
     ])
 
 
-  def get_client_balance_movements(self, account_id: int):
+  def get_client_balance_movements(
+    self,
+    account_id: int,
+    page: int = 0,
+    records_per_page: int = 10,
+  ):
     self._require_client()
     balance_model = (
       self.db.query(CustomersBalance)
@@ -95,9 +101,14 @@ class CustomerBalanceService:
     if balance_model is None:
       self.error.raise_not_found("Balance")
 
+    movements_page = self._get_paginated_movements(
+      balance_model,
+      page=page,
+      records_per_page=records_per_page,
+    )
     return self.success.response({
       "balance": self._serialize_client_balance(balance_model),
-      "movements": self._get_movements(balance_model)
+      **movements_page,
     })
 
 
@@ -119,40 +130,87 @@ class CustomerBalanceService:
     }
 
 
-  def _get_movements(self, balance_model):
-    trxs = self.db.query(Trx).filter(
+  def _get_paginated_movements(
+    self,
+    balance_model,
+    page: int,
+    records_per_page: int,
+  ):
+    transaction_movements = select(
+      literal("Transaccion").label("type"),
+      Trx.amount.label("amount"),
+      Trx.fee_amount.label("fee_amount"),
+      (Trx.amount - func.coalesce(Trx.fee_amount, 0)).label("net_amount"),
+      Trx.date.label("date"),
+      Trx.status.label("status"),
+      Trx.id.label("movement_id"),
+      literal(1).label("source_order"),
+    ).where(
       Trx.account_id == balance_model.id,
-      Trx.status == "conciliado"
-    ).all()
-    payments = self.db.query(Payments).filter(
-      Payments.customer_balance_id == balance_model.id
-    ).all()
-    fee_withdrawals = self.db.query(FeeWithdrawals).filter(
-      FeeWithdrawals.customer_balance_id == balance_model.id
-    ).all()
+      Trx.status == "conciliado",
+    )
+    payment_movements = select(
+      literal("Pago").label("type"),
+      Payments.amount.label("amount"),
+      literal(None, type_=Float).label("fee_amount"),
+      literal(None, type_=Float).label("net_amount"),
+      Payments.date.label("date"),
+      Payments.status.label("status"),
+      Payments.id.label("movement_id"),
+      literal(2).label("source_order"),
+    ).where(Payments.customer_balance_id == balance_model.id)
+    withdrawal_movements = select(
+      literal("Retiro de comision").label("type"),
+      FeeWithdrawals.amount.label("amount"),
+      literal(None, type_=Float).label("fee_amount"),
+      literal(None, type_=Float).label("net_amount"),
+      FeeWithdrawals.date.label("date"),
+      FeeWithdrawals.status.label("status"),
+      FeeWithdrawals.id.label("movement_id"),
+      literal(3).label("source_order"),
+    ).where(FeeWithdrawals.customer_balance_id == balance_model.id)
 
-    combined = [{
-      "type": "Transaccion",
-      "amount": f"{balance_model.currency.name} {trx.amount}",
-      "fee_amount": trx.fee_amount,
-      "net_amount": trx.amount - (trx.fee_amount or 0),
-      "date": trx.date,
-      "status": trx.status,
-    } for trx in trxs]
-    combined.extend({
-      "type": "Pago",
-      "amount": f"{balance_model.currency.name} {payment.amount}",
-      "date": payment.date,
-      "status": payment.status
-    } for payment in payments)
-    combined.extend({
-      "type": "Retiro de comision",
-      "amount": f"{balance_model.currency.name} {withdrawal.amount}",
-      "date": withdrawal.date,
-      "status": withdrawal.status
-    } for withdrawal in fee_withdrawals)
-    combined.sort(key=lambda movement: movement["date"], reverse=True)
-    return combined
+    movements_query = union_all(
+      transaction_movements,
+      payment_movements,
+      withdrawal_movements,
+    ).subquery()
+    total_records = self.db.execute(
+      select(func.count()).select_from(movements_query)
+    ).scalar_one()
+    rows = self.db.execute(
+      select(movements_query)
+      .order_by(
+        movements_query.c.date.desc(),
+        movements_query.c.source_order,
+        movements_query.c.movement_id.desc(),
+      )
+      .offset(page * records_per_page)
+      .limit(records_per_page)
+    ).mappings().all()
+
+    movements = []
+    for row in rows:
+      movement = {
+        "type": row["type"],
+        "amount": f"{balance_model.currency.name} {row['amount']}",
+        "date": row["date"],
+        "status": row["status"],
+      }
+      if row["type"] == "Transaccion":
+        movement["fee_amount"] = row["fee_amount"]
+        movement["net_amount"] = row["net_amount"]
+      movements.append(movement)
+
+    return {
+      "movements": movements,
+      "page": page,
+      "recordsPerPage": records_per_page,
+      "totalRecords": total_records,
+      "totalPages": (
+        total_records + records_per_page - 1
+      ) // records_per_page,
+    }
 
 
   def get_all_movements(self, account_id: int):

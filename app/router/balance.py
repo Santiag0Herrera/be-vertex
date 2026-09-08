@@ -39,10 +39,16 @@ async def get_authenticated_client_balances(db: db_dependency, user: user_depend
 async def get_authenticated_client_balance_movements(
   db: db_dependency,
   user: user_dependency,
-  account_id: int
+  account_id: int = Query(..., gt=0),
+  page: int = Query(0, ge=0),
+  recordsPerPage: int = Query(10, gt=0, le=100),
 ):
   db_service = DBService(db=db, req_user=user)
-  return db_service.balance.get_client_balance_movements(account_id=account_id)
+  return db_service.balance.get_client_balance_movements(
+    account_id=account_id,
+    page=page,
+    records_per_page=recordsPerPage,
+  )
 
 
 @router.post("/create")

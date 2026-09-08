@@ -133,8 +133,8 @@ Bank transaction and payment endpoints.
 - **GET /balance/client/all**
   Lists only the authenticated client's balances.
 
-- **GET /balance/client/detail?account_id={id}**
-  Returns a balance and its movements only when it belongs to the authenticated client.
+- **GET /balance/client/detail?account_id={id}&page=0&recordsPerPage=10**
+  Returns a balance and a page of its movements only when it belongs to the authenticated client. `recordsPerPage` accepts between 1 and 100 records. The result includes `movements`, `page`, `recordsPerPage`, `totalRecords`, and `totalPages`.
 
 ## Órdenes de pago
 

@@ -5,7 +5,18 @@ from fastapi import HTTPException
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from app.models import Base, Clients, Currency, CustomersBalance, Entity, Permission, Trx
+from app.models import (
+    Base,
+    Clients,
+    Currency,
+    CustomersBalance,
+    Entity,
+    FeeWithdrawals,
+    Payments,
+    Permission,
+    Trx,
+    Users,
+)
 from app.services.CustomerBalanceService import CustomerBalanceService
 
 
@@ -93,6 +104,98 @@ def test_client_sees_movements_for_own_balance(client_balances):
     assert response["result"]["balance"]["id"] == own_balance_id
     assert response["result"]["movements"][0]["type"] == "Transaccion"
     assert response["result"]["movements"][0]["net_amount"] == 45
+    assert response["result"]["page"] == 0
+    assert response["result"]["recordsPerPage"] == 10
+    assert response["result"]["totalRecords"] == 1
+    assert response["result"]["totalPages"] == 1
+
+
+def test_client_balance_movements_are_paginated(client_balances):
+    service, own_balance_id, _ = client_balances
+    for index, day in enumerate((21, 22), start=2):
+        service.db.add(Trx(
+            trx_id=f"OWN-TRX-{index}",
+            emisor_name="Pagador",
+            emisor_cuit="20333444556",
+            receptor_cbu="0" * 22,
+            entity_id=service.req_user["entity_id"],
+            client_id=service.req_user["id"],
+            amount=index * 10,
+            date=datetime(2026, 8, day),
+            status="conciliado",
+            account_id=own_balance_id,
+            fee_amount=0,
+        ))
+    service.db.commit()
+
+    first_page = service.get_client_balance_movements(
+        own_balance_id,
+        page=0,
+        records_per_page=2,
+    )["result"]
+    second_page = service.get_client_balance_movements(
+        own_balance_id,
+        page=1,
+        records_per_page=2,
+    )["result"]
+
+    assert [movement["amount"] for movement in first_page["movements"]] == [
+        "ARS 30.0",
+        "ARS 20.0",
+    ]
+    assert [movement["amount"] for movement in second_page["movements"]] == [
+        "ARS 50.0",
+    ]
+    assert first_page["totalRecords"] == 3
+    assert first_page["totalPages"] == 2
+
+
+def test_client_balance_movements_combine_all_movement_types(client_balances):
+    service, own_balance_id, _ = client_balances
+    balance = service.db.get(CustomersBalance, own_balance_id)
+    user = Users(
+        first_name="Usuario",
+        last_name="Interno",
+        email="interno@example.com",
+        hashed_password="hash",
+        entity_id=service.req_user["entity_id"],
+    )
+    service.db.add(user)
+    service.db.flush()
+    service.db.add_all([
+        Payments(
+            payee_user_id=user.id,
+            amount=10,
+            date=datetime(2026, 8, 22),
+            status="consolidado",
+            customer_balance_id=own_balance_id,
+            currency_id=balance.balance_currency_id,
+            entity_id=service.req_user["entity_id"],
+        ),
+        FeeWithdrawals(
+            customer_balance_id=own_balance_id,
+            withdrawn_by_user_id=user.id,
+            entity_id=service.req_user["entity_id"],
+            currency_id=balance.balance_currency_id,
+            amount=5,
+            date=datetime(2026, 8, 21),
+            status="consolidado",
+        ),
+    ])
+    service.db.commit()
+
+    result = service.get_client_balance_movements(
+        own_balance_id,
+        page=0,
+        records_per_page=10,
+    )["result"]
+
+    assert [movement["type"] for movement in result["movements"]] == [
+        "Pago",
+        "Retiro de comision",
+        "Transaccion",
+    ]
+    assert result["totalRecords"] == 3
 
 
 def test_client_cannot_access_another_clients_balance(client_balances):
