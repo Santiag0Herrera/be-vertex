@@ -149,6 +149,7 @@ def test_client_only_sees_own_balances(client_balances):
 
     assert [balance["id"] for balance in response["result"]] == [own_balance_id]
     assert "client" not in response["result"][0]
+    assert "total_loaded_amount" not in response["result"][0]
 
 
 def test_balance_detail_includes_total_loaded_amount(client_balances):
@@ -169,6 +170,8 @@ def test_client_sees_movements_for_own_balance(client_balances):
     response = service.get_client_balance_movements(own_balance_id)
 
     assert response["result"]["balance"]["id"] == own_balance_id
+    assert response["result"]["balance"]["balance_amount"] == 100
+    assert response["result"]["balance"]["total_loaded_amount"] == 125
     assert response["result"]["movements"][0]["type"] == "Transaccion"
     assert response["result"]["movements"][0]["net_amount"] == 45
     assert response["result"]["page"] == 0

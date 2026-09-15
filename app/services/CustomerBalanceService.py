@@ -115,13 +115,22 @@ class CustomerBalanceService:
     if balance_model is None:
       self.error.raise_not_found("Balance")
 
+    pending_amount = self._get_pending_amounts([balance_model.id]).get(
+      balance_model.id,
+      0,
+    )
     movements_page = self._get_paginated_movements(
       balance_model,
       page=page,
       records_per_page=records_per_page,
     )
     return self.success.response({
-      "balance": self._serialize_client_balance(balance_model),
+      "balance": self._serialize_client_balance(
+        balance_model,
+        total_loaded_amount=(
+          balance_model.balance_amount + pending_amount
+        ),
+      ),
       **movements_page,
     })
 
@@ -132,8 +141,8 @@ class CustomerBalanceService:
 
 
   @staticmethod
-  def _serialize_client_balance(balance):
-    return {
+  def _serialize_client_balance(balance, total_loaded_amount=None):
+    result = {
       "id": balance.id,
       "balance_amount": balance.balance_amount,
       "last_update": balance.last_update,
@@ -142,6 +151,9 @@ class CustomerBalanceService:
         "name": balance.currency.name
       } if balance.currency else None
     }
+    if total_loaded_amount is not None:
+      result["total_loaded_amount"] = total_loaded_amount
+    return result
 
 
   def _get_pending_amounts(self, account_ids):
