@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 from app.models import CustomersBalance, Clients, FeeWithdrawals, Payments, Trx, Users
 from sqlalchemy.orm import joinedload
 from app.schemas.customerBalance import CustomerBalanceCreateRequest, FeeWithdrawalRequest
+from app.services.ResponseSerializationService import ResponseSerializationService
 
 class CustomerBalanceService:
   def __init__(self, db: Session, req_user: dict):
@@ -24,7 +25,9 @@ class CustomerBalanceService:
   def get_by_id(self, id):
     balance_model = self._get_balance(id)
     self.error.raise_if_none(balance_model, "Balance")
-    return self.success.response(balance_model)
+    return self.success.response(
+      ResponseSerializationService.balance(balance_model)
+    )
 
 
   def add_amount(self, id, amount_added):
@@ -56,7 +59,18 @@ class CustomerBalanceService:
       )
       .all()
     )
-    return balances_model
+    pending_amounts = self._get_pending_amounts(
+      balance.id for balance in balances_model
+    )
+    return [
+      ResponseSerializationService.balance(
+        balance,
+        total_loaded_amount=(
+          balance.balance_amount + pending_amounts.get(balance.id, 0)
+        ),
+      )
+      for balance in balances_model
+    ]
 
 
   def get_client_balances(self):
@@ -127,6 +141,29 @@ class CustomerBalanceService:
         "id": balance.currency.id,
         "name": balance.currency.name
       } if balance.currency else None
+    }
+
+
+  def _get_pending_amounts(self, account_ids):
+    account_ids = list(account_ids)
+    if not account_ids:
+      return {}
+
+    rows = (
+      self.db.query(
+        Trx.account_id,
+        func.sum(Trx.amount).label("pending_amount"),
+      )
+      .filter(
+        Trx.account_id.in_(account_ids),
+        Trx.status == "pendiente",
+      )
+      .group_by(Trx.account_id)
+      .all()
+    )
+    return {
+      account_id: pending_amount
+      for account_id, pending_amount in rows
     }
 
 
@@ -230,6 +267,16 @@ class CustomerBalanceService:
     )
     if balance_model is None:
       return {"status": "ok", "data": None}
+    pending_amount = self._get_pending_amounts([balance_model.id]).get(
+      balance_model.id,
+      0,
+    )
+    serialized_balance = ResponseSerializationService.balance(
+      balance_model,
+      total_loaded_amount=(
+        balance_model.balance_amount + pending_amount
+      ),
+    )
     # Movimientos de ingresos (TRX)
     trxs = (
       self.db.query(Trx)
@@ -276,7 +323,7 @@ class CustomerBalanceService:
     # Ordenar por fecha descendente
     combined.sort(key=lambda x: str(x["date"]), reverse=True)
     return {"status": "ok", "data": {
-      "balance": balance_model,
+      "balance": serialized_balance,
       "movements": combined[:10]
     }}
 

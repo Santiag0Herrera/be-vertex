@@ -24,7 +24,10 @@ class ClientService():
   def get_all(self) -> List[ClientResponse]:
     stmt = select(Clients).where(Clients.entity_id == self.req_user.get("entity_id")).where(Clients.enabled == True)
     clients_model = self.db.execute(stmt).scalars().all()
-    return clients_model
+    return [
+      ClientResponse.model_validate(client)
+      for client in clients_model
+    ]
 
 
   def create(self, new_client_request: NewClientRequest):

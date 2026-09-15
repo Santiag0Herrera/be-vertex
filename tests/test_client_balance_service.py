@@ -2,6 +2,7 @@ from datetime import datetime
 
 import pytest
 from fastapi import HTTPException
+from fastapi.encoders import jsonable_encoder
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
@@ -76,6 +77,44 @@ def client_balances():
         account_id=own_balance.id,
         fee_amount=5,
     ))
+    db.add_all([
+        Trx(
+            trx_id="OWN-PENDING-TRX",
+            emisor_name="Pagador pendiente",
+            emisor_cuit="20333444556",
+            receptor_cbu="0" * 22,
+            entity_id=entity.id,
+            client_id=client.id,
+            amount=25,
+            date=datetime(2026, 8, 21),
+            status="pendiente",
+            account_id=own_balance.id,
+        ),
+        Trx(
+            trx_id="OTHER-PENDING-TRX",
+            emisor_name="Otro pagador",
+            emisor_cuit="20333444556",
+            receptor_cbu="0" * 22,
+            entity_id=entity.id,
+            client_id=other_client.id,
+            amount=500,
+            date=datetime(2026, 8, 21),
+            status="pendiente",
+            account_id=other_balance.id,
+        ),
+        Trx(
+            trx_id="OWN-REPEATED-TRX",
+            emisor_name="Pagador repetido",
+            emisor_cuit="20333444556",
+            receptor_cbu="0" * 22,
+            entity_id=entity.id,
+            client_id=client.id,
+            amount=75,
+            date=datetime(2026, 8, 21),
+            status="repetido",
+            account_id=own_balance.id,
+        ),
+    ])
     db.commit()
 
     service = CustomerBalanceService(db, {
@@ -87,6 +126,22 @@ def client_balances():
     db.close()
 
 
+def test_balance_list_includes_total_loaded_amount(client_balances):
+    service, own_balance_id, other_balance_id = client_balances
+
+    balances = {
+        balance["id"]: jsonable_encoder(balance)
+        for balance in service.get_all()
+    }
+
+    assert balances[own_balance_id]["balance_amount"] == 100
+    assert balances[own_balance_id]["total_loaded_amount"] == 125
+    assert "hashed_password" not in balances[own_balance_id]["client"]
+    assert balances[other_balance_id]["balance_amount"] == 999
+    assert balances[other_balance_id]["total_loaded_amount"] == 1499
+    assert "hashed_password" not in balances[other_balance_id]["client"]
+
+
 def test_client_only_sees_own_balances(client_balances):
     service, own_balance_id, _ = client_balances
 
@@ -94,6 +149,18 @@ def test_client_only_sees_own_balances(client_balances):
 
     assert [balance["id"] for balance in response["result"]] == [own_balance_id]
     assert "client" not in response["result"][0]
+
+
+def test_balance_detail_includes_total_loaded_amount(client_balances):
+    service, own_balance_id, _ = client_balances
+
+    response = service.get_all_movements(own_balance_id)
+    encoded_balance = jsonable_encoder(response["data"]["balance"])
+
+    assert encoded_balance["balance_amount"] == 100
+    assert encoded_balance["total_loaded_amount"] == 125
+    assert encoded_balance["client"]["email"] == "propio@example.com"
+    assert "hashed_password" not in encoded_balance["client"]
 
 
 def test_client_sees_movements_for_own_balance(client_balances):

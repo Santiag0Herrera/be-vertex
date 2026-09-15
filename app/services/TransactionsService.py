@@ -14,6 +14,7 @@ from .ErrorService import ErrorService
 from .SuccessService import SuccessService
 from .InterBankingService import InterBankingService
 from .N8NService import N8NService
+from .ResponseSerializationService import ResponseSerializationService
 
 
 class TransactionsService:
@@ -101,7 +102,10 @@ class TransactionsService:
 
         base_query = (
             self.db.query(Trx)
-            .options(joinedload(Trx.account).joinedload(CustomersBalance.currency))
+            .options(
+                joinedload(Trx.account).joinedload(CustomersBalance.client),
+                joinedload(Trx.account).joinedload(CustomersBalance.currency),
+            )
             .join(CustomersBalance, Trx.account_id == CustomersBalance.id)
             .join(Clients, CustomersBalance.client_id == Clients.id)
             .filter(
@@ -162,7 +166,10 @@ class TransactionsService:
         day_total_amount = sum(transaction.amount for transaction in transactions_model)
 
         result = {
-            "transactions": transactions_model,
+            "transactions": [
+                ResponseSerializationService.transaction(transaction)
+                for transaction in transactions_model
+            ],
             "total_amount": day_total_amount,
             "page": page,
             "recordsPerPage": recordsPerPage,
@@ -287,7 +294,10 @@ class TransactionsService:
 
         base_query = (
             self.db.query(Trx)
-            .options(joinedload(Trx.account).joinedload(CustomersBalance.currency))
+            .options(
+                joinedload(Trx.account).joinedload(CustomersBalance.client),
+                joinedload(Trx.account).joinedload(CustomersBalance.currency),
+            )
             .join(CustomersBalance, Trx.account_id == CustomersBalance.id)
             .filter(CustomersBalance.client_id == self.req_user.get("id"))
         )
@@ -308,7 +318,10 @@ class TransactionsService:
         )
         day_total_amount = sum(transaction.amount for transaction in transactions_model)
         result = {
-            "transactions": transactions_model,
+            "transactions": [
+                ResponseSerializationService.transaction(transaction)
+                for transaction in transactions_model
+            ],
             "total_amount": day_total_amount,
             "page": page,
             "recordsPerPage": recordsPerPage,

@@ -125,10 +125,10 @@ Bank transaction and payment endpoints.
 ## 💰 `balance.py`
 
 - **GET /balance/all**
-  Lists the balances for all clients belonging to an internal user's entity.
+  Lists the balances for all clients belonging to an internal user's entity. Each balance includes `balance_amount` and `total_loaded_amount`, calculated as the balance plus its pending transactions.
 
 - **GET /balance/detail?account_id={id}**
-  Returns balance details and movements for an internal user's entity.
+  Returns balance details and movements for an internal user's entity. The balance includes `balance_amount` and `total_loaded_amount`, calculated as the balance plus its pending transactions.
 
 - **GET /balance/client/all**
   Lists only the authenticated client's balances.

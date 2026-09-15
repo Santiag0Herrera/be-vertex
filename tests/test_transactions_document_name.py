@@ -1,5 +1,6 @@
 from datetime import date
 
+from fastapi.encoders import jsonable_encoder
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
@@ -194,6 +195,23 @@ def test_get_all_filters_by_partial_document_name():
         {"id": user.id, "entity_id": entity.id},
     ).get_all(document_name="agosto")
 
-    transactions = response["result"]["transactions"]
-    assert [trx.trx_id for trx in transactions] == ["FILTER-001"]
+    transactions = jsonable_encoder(response["result"]["transactions"])
+    assert [trx["trx_id"] for trx in transactions] == ["FILTER-001"]
+    assert transactions[0]["account"]["client"]["email"] == client.email
+    assert "hashed_password" not in transactions[0]["account"]["client"]
+
+    client_response = TransactionsService(
+        db,
+        {
+            "id": client.id,
+            "entity_id": entity.id,
+            "account_type": "client",
+        },
+    ).get_all_by_client_id()
+    client_transactions = jsonable_encoder(
+        client_response["result"]["transactions"]
+    )
+    assert "hashed_password" not in (
+        client_transactions[0]["account"]["client"]
+    )
     db.close()
