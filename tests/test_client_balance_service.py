@@ -56,11 +56,13 @@ def client_balances():
         client_id=client.id,
         balance_amount=100,
         balance_currency_id=currency.id,
+        fee_percentage=10,
     )
     other_balance = CustomersBalance(
         client_id=other_client.id,
         balance_amount=999,
         balance_currency_id=currency.id,
+        fee_percentage=5,
     )
     db.add_all([own_balance, other_balance])
     db.flush()
@@ -135,10 +137,10 @@ def test_balance_list_includes_total_loaded_amount(client_balances):
     }
 
     assert balances[own_balance_id]["balance_amount"] == 100
-    assert balances[own_balance_id]["total_loaded_amount"] == 125
+    assert balances[own_balance_id]["total_loaded_amount"] == 122.5
     assert "hashed_password" not in balances[own_balance_id]["client"]
     assert balances[other_balance_id]["balance_amount"] == 999
-    assert balances[other_balance_id]["total_loaded_amount"] == 1499
+    assert balances[other_balance_id]["total_loaded_amount"] == 1474
     assert "hashed_password" not in balances[other_balance_id]["client"]
 
 
@@ -159,7 +161,7 @@ def test_balance_detail_includes_total_loaded_amount(client_balances):
     encoded_balance = jsonable_encoder(response["data"]["balance"])
 
     assert encoded_balance["balance_amount"] == 100
-    assert encoded_balance["total_loaded_amount"] == 125
+    assert encoded_balance["total_loaded_amount"] == 122.5
     assert encoded_balance["client"]["email"] == "propio@example.com"
     assert "hashed_password" not in encoded_balance["client"]
 
@@ -171,7 +173,7 @@ def test_client_sees_movements_for_own_balance(client_balances):
 
     assert response["result"]["balance"]["id"] == own_balance_id
     assert response["result"]["balance"]["balance_amount"] == 100
-    assert response["result"]["balance"]["total_loaded_amount"] == 125
+    assert response["result"]["balance"]["total_loaded_amount"] == 122.5
     assert response["result"]["movements"][0]["type"] == "Transaccion"
     assert response["result"]["movements"][0]["net_amount"] == 45
     assert response["result"]["page"] == 0

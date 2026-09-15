@@ -125,16 +125,16 @@ Bank transaction and payment endpoints.
 ## 💰 `balance.py`
 
 - **GET /balance/all**
-  Lists the balances for all clients belonging to an internal user's entity. Each balance includes `balance_amount` and `total_loaded_amount`, calculated as the balance plus its pending transactions.
+  Lists the balances for all clients belonging to an internal user's entity. Each balance includes `balance_amount` and `total_loaded_amount`, calculated as the balance plus its pending transactions after deducting the account's fee percentage.
 
 - **GET /balance/detail?account_id={id}**
-  Returns balance details and movements for an internal user's entity. The balance includes `balance_amount` and `total_loaded_amount`, calculated as the balance plus its pending transactions.
+  Returns balance details and movements for an internal user's entity. The balance includes `balance_amount` and `total_loaded_amount`, calculated as the balance plus its pending transactions after deducting the account's fee percentage.
 
 - **GET /balance/client/all**
   Lists only the authenticated client's balances.
 
 - **GET /balance/client/detail?account_id={id}&page=0&recordsPerPage=10**
-  Returns a balance and a page of its movements only when it belongs to the authenticated client. The balance includes `balance_amount` and `total_loaded_amount`, calculated as the balance plus its pending transactions. `recordsPerPage` accepts between 1 and 100 records. The result includes `movements`, `page`, `recordsPerPage`, `totalRecords`, and `totalPages`.
+  Returns a balance and a page of its movements only when it belongs to the authenticated client. The balance includes `balance_amount` and `total_loaded_amount`, calculated as the balance plus its pending transactions after deducting the account's fee percentage. `recordsPerPage` accepts between 1 and 100 records. The result includes `movements`, `page`, `recordsPerPage`, `totalRecords`, and `totalPages`.
 
 ## Órdenes de pago
 

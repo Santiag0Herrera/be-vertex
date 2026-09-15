@@ -1,3 +1,4 @@
+from decimal import Decimal
 from .ErrorService import ErrorService
 from .SuccessService import SuccessService
 from sqlalchemy import Float, func, literal, select, union_all
@@ -65,8 +66,9 @@ class CustomerBalanceService:
     return [
       ResponseSerializationService.balance(
         balance,
-        total_loaded_amount=(
-          balance.balance_amount + pending_amounts.get(balance.id, 0)
+        total_loaded_amount=self._calculate_total_loaded_amount(
+          balance,
+          pending_amounts.get(balance.id, 0),
         ),
       )
       for balance in balances_model
@@ -127,8 +129,9 @@ class CustomerBalanceService:
     return self.success.response({
       "balance": self._serialize_client_balance(
         balance_model,
-        total_loaded_amount=(
-          balance_model.balance_amount + pending_amount
+        total_loaded_amount=self._calculate_total_loaded_amount(
+          balance_model,
+          pending_amount,
         ),
       ),
       **movements_page,
@@ -177,6 +180,20 @@ class CustomerBalanceService:
       account_id: pending_amount
       for account_id, pending_amount in rows
     }
+
+
+  @staticmethod
+  def _calculate_total_loaded_amount(balance, pending_amount):
+    pending_amount = Decimal(str(pending_amount or 0))
+    fee_percentage = Decimal(str(balance.fee_percentage or 0))
+    pending_fee = (
+      pending_amount * fee_percentage / Decimal("100")
+    ).quantize(Decimal("0.01"))
+    return float(
+      Decimal(str(balance.balance_amount))
+      + pending_amount
+      - pending_fee
+    )
 
 
   def _get_paginated_movements(
@@ -285,8 +302,9 @@ class CustomerBalanceService:
     )
     serialized_balance = ResponseSerializationService.balance(
       balance_model,
-      total_loaded_amount=(
-        balance_model.balance_amount + pending_amount
+      total_loaded_amount=self._calculate_total_loaded_amount(
+        balance_model,
+        pending_amount,
       ),
     )
     # Movimientos de ingresos (TRX)
