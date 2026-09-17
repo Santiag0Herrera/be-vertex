@@ -3,7 +3,7 @@ from .ErrorService import ErrorService
 from .SuccessService import SuccessService
 from sqlalchemy import Float, func, literal, select, union_all
 from sqlalchemy.orm import Session
-from app.models import CustomersBalance, Clients, FeeWithdrawals, Payments, Trx, Users
+from app.models import CustomersBalance, Clients, Currency, FeeWithdrawals, Payments, Trx, Users
 from sqlalchemy.orm import joinedload
 from app.schemas.customerBalance import CustomerBalanceCreateRequest, FeeWithdrawalRequest
 from app.services.ResponseSerializationService import ResponseSerializationService
@@ -16,10 +16,15 @@ class CustomerBalanceService:
     self.success = SuccessService()
   
   def _get_balance(self, id):
-    balance_model = self.db.query(CustomersBalance).filter(
+    query = self.db.query(CustomersBalance).join(Clients).filter(
       CustomersBalance.id == id,
-      CustomersBalance.enabled == True
-    ).first()
+      CustomersBalance.enabled == True,
+      Clients.enabled == True,
+      Clients.entity_id == self.req_user.get("entity_id"),
+    )
+    if self.req_user.get("account_type") == "client":
+      query = query.filter(Clients.id == self.req_user.get("id"))
+    balance_model = query.first()
     self.error.raise_if_none(balance_model, "Balance")
     return balance_model
 
@@ -63,7 +68,7 @@ class CustomerBalanceService:
     pending_amounts = self._get_pending_amounts(
       balance.id for balance in balances_model
     )
-    return [
+    return self.success.response([
       ResponseSerializationService.balance(
         balance,
         total_loaded_amount=self._calculate_total_loaded_amount(
@@ -72,7 +77,7 @@ class CustomerBalanceService:
         ),
       )
       for balance in balances_model
-    ]
+    ])
 
 
   def get_client_balances(self):
@@ -84,7 +89,8 @@ class CustomerBalanceService:
       .filter(
         CustomersBalance.client_id == self.req_user.get("id"),
         CustomersBalance.enabled == True,
-        Clients.enabled == True
+        Clients.enabled == True,
+        Clients.entity_id == self.req_user.get("entity_id"),
       )
       .options(joinedload(CustomersBalance.currency))
       .all()
@@ -109,7 +115,8 @@ class CustomerBalanceService:
         CustomersBalance.id == account_id,
         CustomersBalance.client_id == self.req_user.get("id"),
         CustomersBalance.enabled == True,
-        Clients.enabled == True
+        Clients.enabled == True,
+        Clients.entity_id == self.req_user.get("entity_id"),
       )
       .options(joinedload(CustomersBalance.currency))
       .first()
@@ -295,7 +302,7 @@ class CustomerBalanceService:
       .first()
     )
     if balance_model is None:
-      return {"status": "ok", "data": None}
+      return self.success.response(None)
     pending_amount = self._get_pending_amounts([balance_model.id]).get(
       balance_model.id,
       0,
@@ -352,21 +359,30 @@ class CustomerBalanceService:
       })
     # Ordenar por fecha descendente
     combined.sort(key=lambda x: str(x["date"]), reverse=True)
-    return {"status": "ok", "data": {
+    return self.success.response({
       "balance": serialized_balance,
       "movements": combined[:10]
-    }}
+    })
 
 
   def create(
     self,
     customer_balance_request: CustomerBalanceCreateRequest
   ):
-    client_model = self.db.query(Clients).filter(Clients.id == customer_balance_request.client_id).first()
+    client_model = self.db.query(Clients).filter(
+      Clients.id == customer_balance_request.client_id,
+      Clients.entity_id == self.req_user.get("entity_id"),
+      Clients.enabled == True,
+    ).first()
     
     if client_model is None:
       return self.error.raise_not_found("Client")
     
+    currency_model = self.db.query(Currency).filter(
+      Currency.id == customer_balance_request.balance_currency_id,
+    ).first()
+    self.error.raise_if_none(currency_model, "Currency")
+
     create_customer_balance = CustomersBalance(
       client_id=client_model.id,
       balance_amount=0,
@@ -376,7 +392,7 @@ class CustomerBalanceService:
     )
     self.db.add(create_customer_balance)
     self.db.commit()
-    return {'status': 'ok', 'result': "Balance creado correctamente."}
+    return self.success.response("Balance creado correctamente.")
   
 
   def update_fee_percentage(self, balance_id: int, new_fee_percentage: float):
@@ -384,7 +400,7 @@ class CustomerBalanceService:
     balance_model.fee_percentage = new_fee_percentage
     self.db.add(balance_model)
     self.db.commit()
-    return {'status': 'ok', 'result': "Porcentaje de fee actualizado correctamente."}
+    return self.success.response("Porcentaje de fee actualizado correctamente.")
 
 
   def delete(self, balance_id: int):

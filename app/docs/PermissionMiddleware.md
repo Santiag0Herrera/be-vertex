@@ -1,76 +1,45 @@
+# Autenticación y autorización
 
-# 🛡️ Middleware: `PermissionMiddleware`
+La autorización tiene dos capas complementarias.
 
-## 📄 Description
-This middleware ensures that authenticated users have the correct permissions to access specific API routes. It uses JWT tokens to identify the user and their hierarchy level, then checks the database to determine if access is authorized.
+## 1. Validación global del JWT
 
-## 🧠 How It Works
+`PermissionMiddleware` exige `Authorization: Bearer <token>` para toda ruta salvo:
 
-1. Intercepts each incoming HTTP request.
-2. Allows direct access to public paths (e.g., `/auth/`, `/docs`).
-3. Validates the presence and format of the JWT token in the `Authorization` header.
-4. Decodes the token using a `SECRET_KEY` and the `HS256` algorithm.
-5. Extracts `perm_id` and `hierarchy` from the token payload.
-6. Queries the database to verify if the user has sufficient permissions.
-7. Grants or denies access accordingly.
+- `POST /auth/token`
+- `/docs`
+- `/openapi.json`
+- `/redoc`
 
-## 🔐 Validations
+El middleware verifica la firma HS256 con `JWT_SECRET_KEY`, el vencimiento y los claims mínimos `perm_id`, `hierarchy` y `account_type`. También registra la request en la tabla de auditoría. Un fallo del registro no interrumpe la request.
 
-- **JWT Token**:
-  - Must be present and properly formatted (`Bearer <token>`).
-  - Must be successfully decoded.
-  - Must contain `perm_id` and `hierarchy`.
+El middleware no decide permisos por URL ni consulta la tabla `endpoints`.
 
-- **Permissions and Hierarchy**:
-  - Checks the `Endpoints` table joined with `Permission`.
-  - User's `hierarchy` must be greater than or equal to the required value for the requested path.
+## 2. Actor y permiso actuales
 
-## ⚠️ Error Handling
+Las dependencias de FastAPI vuelven a cargar el actor y validan que:
 
-| Status Code | Cause                               | Description                          |
-|-------------|--------------------------------------|--------------------------------------|
-| 403         | Missing token, access denied, error | Access denied or internal failure    |
-| 401         | Invalid token or missing fields     | Authentication failure               |
+- el usuario o cliente siga habilitado;
+- pertenezca a la entidad incluida en el token;
+- la entidad siga habilitada;
+- el permiso actual coincida con `perm_id`, nivel y jerarquía del token;
+- la ruta acepte ese tipo de cuenta y rol.
 
-### Logging
-Uses the `logging` module to track key events:
+Dependencias disponibles:
 
-- `INFO`: Incoming requests and valid tokens.
-- `WARNING`: Missing authentication or insufficient permissions.
-- `ERROR`: Decoding issues or general exceptions.
+- `get_current_user`: cualquier actor autenticado.
+- `require_internal_user`: sólo usuarios internos.
+- `require_client`: sólo clientes.
+- `require_admin_user`: usuarios internos con nivel `admin` o `super`.
 
-## 🔓 Public Paths Exempted
+Los servicios aplican además filtros por `entity_id` y, para clientes, por `client_id`. De este modo, conocer un ID de otra entidad no concede acceso.
 
-```python
-public_paths = [
-  "/auth/", "/auth/token", "/docs",
-  "/openapi.json", "/redoc"
-]
-```
+## Configuración
 
-These paths bypass token validation and permission checks.
+`JWT_SECRET_KEY` es obligatoria. La aplicación falla de forma cerrada si no está configurada; no existe un secreto embebido en el código.
 
-## 🛠️ Requirements
+## Respuestas
 
-- Dependencies:
-  - `fastapi`, `starlette`, `jose`, `sqlalchemy`
-- Models required:
-  - `Endpoints`, `Permission`
-- Database:
-  - `SessionLocal` from `db.database`
-
-## 🧪 Example of Expected Token
-
-```json
-{
-  "perm_id": 3,
-  "hierarchy": 2,
-  "exp": 1716982112
-}
-```
-
-## 🧹 Best Practices
-
-- Periodically rotate the `SECRET_KEY`.
-- Implement token expiration and renewal handling.
-- Maintain well-defined permission hierarchies for clean access control.
+- Token faltante, inválido, vencido o desincronizado con la base: HTTP 401.
+- Tipo de cuenta o rol insuficiente: HTTP 403.
+- Recurso fuera de la entidad: HTTP 404, para no revelar su existencia.

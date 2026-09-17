@@ -69,4 +69,7 @@ class PaymentService:
         return self.success.response("Pago creado correctamente")
 
     def get_all(self):
-        return self.db.query(Payments).filter(Payments.entity_id == self.req_user.get("entity_id")).all()
+        payments = self.db.query(Payments).filter(
+            Payments.entity_id == self.req_user.get("entity_id")
+        ).all()
+        return self.success.response(payments)

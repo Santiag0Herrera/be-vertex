@@ -1,19 +1,16 @@
 import datetime
 
 from sqlalchemy.orm import Session, joinedload
-from app.models import Trx, Users, CBU, Entity, CustomersBalance, EntityCBU, Clients
+from app.models import Trx, CBU, Entity, CustomersBalance, EntityCBU, Clients
 from sqlalchemy import cast, or_, String
 from app.schemas.transactions import (
     DocumentRequest,
     MultipleDocumentRequest,
-    UploadDocumentRequest,
 )
 import uuid
 
 from .ErrorService import ErrorService
 from .SuccessService import SuccessService
-from .InterBankingService import InterBankingService
-from .N8NService import N8NService
 from .ResponseSerializationService import ResponseSerializationService
 
 
@@ -28,8 +25,24 @@ class TransactionsService:
         self.req_user = req_user
         self.error = ErrorService()
         self.success = SuccessService()
-        self.ib_service = InterBankingService()
-        self.n8n_service = N8NService()
+
+    def _get_scoped_account(self, account_id: int) -> CustomersBalance:
+        query = (
+            self.db.query(CustomersBalance)
+            .join(Clients, CustomersBalance.client_id == Clients.id)
+            .filter(
+                CustomersBalance.id == account_id,
+                CustomersBalance.enabled == True,
+                Clients.enabled == True,
+                Clients.entity_id == self.req_user.get("entity_id"),
+            )
+        )
+        if self.req_user.get("account_type") == "client":
+            query = query.filter(Clients.id == self.req_user.get("id"))
+
+        account = query.first()
+        self.error.raise_if_none(account, "Client Account")
+        return account
 
     def _parse_date_filter(self, value, end_of_day=False):
         if not value:
@@ -68,16 +81,6 @@ class TransactionsService:
 
         self.error.raise_bad_request("Invalid date value.")
 
-    async def _verify_bank_movement(
-        self, account_number: str, bank_number: str, customer_id: str
-    ):
-        movement_model = self.ib_service.get_movement(
-            account_number=account_number,
-            bank_number=bank_number,
-            customer_id=customer_id,
-        )
-        return self.error.raise_if_none(movement_model, "Movment")
-
     def get_all(
         self,
         page=0,
@@ -91,12 +94,8 @@ class TransactionsService:
         client_id=None,
         document_name=None,
     ):
-        user_model = (
-            self.db.query(Users).filter(Users.id == self.req_user.get("id")).first()
-        )
-
         page = max(int(page or 0), 0)
-        recordsPerPage = max(int(recordsPerPage or 10), 1)
+        recordsPerPage = min(max(int(recordsPerPage or 10), 1), 100)
 
         offset = page * recordsPerPage
 
@@ -109,7 +108,8 @@ class TransactionsService:
             .join(CustomersBalance, Trx.account_id == CustomersBalance.id)
             .join(Clients, CustomersBalance.client_id == Clients.id)
             .filter(
-                Trx.entity_id == user_model.entity_id,
+                Trx.entity_id == self.req_user.get("entity_id"),
+                Clients.entity_id == self.req_user.get("entity_id"),
             )
         )
 
@@ -180,14 +180,15 @@ class TransactionsService:
         return self.success.response(result)
 
     def create(self, document_request: DocumentRequest, user: dict):
-        account_model = self.db.query(CustomersBalance).filter(
-            CustomersBalance.id == document_request.account_id
-        ).first()
-        self.error.raise_if_none(account_model, "Client Account")
+        account_model = self._get_scoped_account(document_request.account_id)
 
         cbu_model = (
             self.db.query(CBU)
-            .filter(CBU.cuit == document_request.receptor_cuit)
+            .join(EntityCBU, EntityCBU.cbu_id == CBU.id)
+            .filter(
+                CBU.cuit == document_request.receptor_cuit,
+                EntityCBU.entity_id == self.req_user.get("entity_id"),
+            )
             .first()
         )
         self.error.raise_if_none(cbu_model)
@@ -228,12 +229,7 @@ class TransactionsService:
         return self.success.response("Transaction registered!")
 
     def create_multiple(self, multiple_trx_request: MultipleDocumentRequest):
-        account_model = (
-            self.db.query(CustomersBalance)
-            .filter(CustomersBalance.id == multiple_trx_request.account_id)
-            .first()
-        )
-        self.error.raise_if_none(account_model, "Client Account")
+        account_model = self._get_scoped_account(multiple_trx_request.account_id)
         entity_model = (
             self.db.query(Entity)
             .filter(Entity.id == self.req_user.get("entity_id"))
@@ -243,6 +239,16 @@ class TransactionsService:
         receptor_account_number = multiple_trx_request.owner_account_number
         if not receptor_account_number:
             self.error.raise_bad_request("Owner account number is required")
+        owner_account = (
+            self.db.query(EntityCBU)
+            .join(CBU, EntityCBU.cbu_id == CBU.id)
+            .filter(
+                EntityCBU.entity_id == self.req_user.get("entity_id"),
+                CBU.nro == receptor_account_number,
+            )
+            .first()
+        )
+        self.error.raise_if_none(owner_account, "Owner account")
         new_trx = []
         for doc in multiple_trx_request.transactions:
             emisor_name = doc.emisor_name or entity_model.name
@@ -255,6 +261,7 @@ class TransactionsService:
                 emisor_cuit=emisor_cuit,
                 receptor_cbu=receptor_account_number,
                 entity_id=entity_model.id,
+                client_id=account_model.client_id,
                 amount=doc.amount,
                 date=doc.date,
                 trx_id=f"AUTO-{uuid.uuid4().hex[:16].upper()}",
@@ -269,11 +276,6 @@ class TransactionsService:
             {"created": len(new_trx), "duplicates": []}
         )
 
-    async def upload_file(self, upload_document_request: UploadDocumentRequest):
-        response = await self.n8n_service.ai_extract_info(upload_document_request)
-        self.error.raise_if_none(response, "Document info")
-        return response
-
     def get_all_by_client_id(
         self,
         page=0,
@@ -287,7 +289,7 @@ class TransactionsService:
             self.error.raise_forbidden("Este endpoint es exclusivo para clientes.")
 
         page = max(int(page or 0), 0)
-        recordsPerPage = max(int(recordsPerPage or 10), 1)
+        recordsPerPage = min(max(int(recordsPerPage or 10), 1), 100)
         offset = page * recordsPerPage
         date_from_filter = self._parse_date_filter(dateFrom)
         date_to_filter = self._parse_date_filter(dateTo, end_of_day=True)
@@ -299,7 +301,10 @@ class TransactionsService:
                 joinedload(Trx.account).joinedload(CustomersBalance.currency),
             )
             .join(CustomersBalance, Trx.account_id == CustomersBalance.id)
-            .filter(CustomersBalance.client_id == self.req_user.get("id"))
+            .filter(
+                CustomersBalance.client_id == self.req_user.get("id"),
+                Trx.entity_id == self.req_user.get("entity_id"),
+            )
         )
 
         if date_from_filter:

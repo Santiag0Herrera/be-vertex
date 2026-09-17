@@ -4,12 +4,12 @@ from fastapi import APIRouter, Depends
 from app.db.database import get_db
 from starlette import status
 from app.services.DBService import DBService
-from app.services.auth_service import get_current_user
+from app.services.auth_service import require_admin_user
 
 router = APIRouter(prefix="/logs", tags=["Logs"])
 
 db_dependency = Annotated[Session, Depends(get_db)]
-user_dependency = Annotated[dict, Depends(get_current_user)]
+user_dependency = Annotated[dict, Depends(require_admin_user)]
 
 
 @router.get("/all", status_code=status.HTTP_200_OK)

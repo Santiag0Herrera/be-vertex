@@ -12,4 +12,4 @@ class CurrencyService:
   
   def get_all(self):
     currencies_model = self.db.query(Currency).all()
-    return currencies_model
+    return self.success.response(currencies_model)

@@ -1,8 +1,8 @@
 from .ErrorService import ErrorService
 from .SuccessService import SuccessService
 from fastapi import HTTPException
+import httpx
 import os
-import requests
 import datetime
 import jwt
 from app.bank_codes import codes
@@ -11,7 +11,6 @@ from typing import Optional
 
 class InterBankingService:
     def __init__(self):
-        self.client = requests
         self.error = ErrorService()
         self.success = SuccessService()
         self.ib_auth_url = os.getenv("MS_INTER_BANKING_AUTH_URL")
@@ -22,11 +21,42 @@ class InterBankingService:
         self.client_secret = os.getenv("MS_INTER_BANKING_CLIENT_SECRET")
         self.customer_id = os.getenv("MS_INTER_BANKING_CUSTOMER_ID")
         self.token = os.getenv("MS_INTER_BANKING_AT")
-        self.auth_headers = {
-            "Content-Type": "application/x-www-form-urlencoded",
-            "Accept": "application/json",
-            "service": "http://localhost:8000/dummy-callback",
-        }
+        try:
+            self.timeout_seconds = max(
+                1.0,
+                float(os.getenv("MS_INTER_BANKING_TIMEOUT_SECONDS", "20")),
+            )
+        except ValueError:
+            self.timeout_seconds = 20.0
+
+    async def _request(self, method: str, url: Optional[str], **kwargs):
+        if not url:
+            raise HTTPException(
+                status_code=503,
+                detail="Interbanking is not configured.",
+            )
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
+                return await client.request(method, url, **kwargs)
+        except httpx.TimeoutException as exc:
+            raise HTTPException(
+                status_code=504,
+                detail="Interbanking did not respond in time.",
+            ) from exc
+        except httpx.RequestError as exc:
+            raise HTTPException(
+                status_code=502,
+                detail="Unable to connect to Interbanking.",
+            ) from exc
+
+    @staticmethod
+    def _build_url(base_url: Optional[str], suffix: str = "") -> str:
+        if not base_url:
+            raise HTTPException(
+                status_code=503,
+                detail="Interbanking is not configured.",
+            )
+        return f"{base_url}{suffix}"
 
     @staticmethod
     def _parse_json_response(response, service_name: str):
@@ -97,9 +127,8 @@ class InterBankingService:
             "Content-Type": "application/x-www-form-urlencoded",
             "Accept": "application/json",
             "service": "http://localhost:8000/dummy-callback",
-            "Cookie": "JSESSIONID=588CA22D9BBCA573D8434D2AD597A7E0; incap_ses_7224_2935514=YgIqC6S/NkblSJPYMs5AZO04lmgAAAAAy1GPB8rcP6uHJzmXuw6M7w==; visid_incap_2935514=YMhpCTdhT3+dABCItC/te+w4lmgAAAAAQUIPAAAAAACSdf1G2IB40aoC6mXv7MpU; a911021363f92e0661f0698f562fc1d7=abdb1d2067e3edc11e05c707d6cd0e2e",
         }
-        response = requests.request("POST", url, headers=headers, data=payload)
+        response = await self._request("POST", url, headers=headers, data=payload)
         result = self._parse_json_response(response, "Interbanking auth")
         bearer_token = self._get_bearer_token(result)
         if not bearer_token:
@@ -118,18 +147,20 @@ class InterBankingService:
         Obtains movements
         """
         await self._update_token()
-        url = f"{self.ib_api_url}{account_number}/movements/anteriores?bank-number={bank_number}&customer-id={self.customer_id}"
+        url = self._build_url(
+            self.ib_api_url,
+            f"{account_number}/movements/anteriores?bank-number={bank_number}&customer-id={self.customer_id}",
+        )
         if date_since:
             url += f"&date-since={date_since}"
         if date_until:
             url += f"&date-until={date_until}"
-        payload = {}
         headers = {
             "Accept": "application/json",
             "Authorization": f"Bearer {self._get_bearer_token(self.token)}",
             "client_id": self.client_id,
         }
-        response = requests.get(url, headers=headers, params={"limit": 1000})
+        response = await self._request("GET", url, headers=headers, params={"limit": 1000})
 
         result = self._parse_json_response(response, "Interbanking movements")
         return result
@@ -142,18 +173,20 @@ class InterBankingService:
         Obtains movements
         """
         await self._update_token()
-        url = f"{self.ib_api_url}{account_number}/movements/ZUGHUS?bank-number={bank_number}&customer-id={self.customer_id}"
+        url = self._build_url(
+            self.ib_api_url,
+            f"{account_number}/movements/ZUGHUS?bank-number={bank_number}&customer-id={self.customer_id}",
+        )
         if date_since:
             url += f"&date-since={date_since}"
         if date_until:
             url += f"&date-until={date_until}"
-        payload = {}
         headers = {
             "Accept": "application/json",
             "Authorization": f"Bearer {self._get_bearer_token(self.token)}",
             "client_id": self.client_id,
         }
-        response = requests.request("GET", url, headers=headers, data=payload)
+        response = await self._request("GET", url, headers=headers)
         result = self._parse_json_response(response, "Interbanking historical movements")
         return result
     
@@ -204,15 +237,17 @@ class InterBankingService:
 
     async def get_accounts_balances(self):
         await self._update_token()
-        url = f"{self.ib_balances_api_url}?customer-id={self.customer_id}"
-        payload = {}
+        url = self._build_url(
+            self.ib_balances_api_url,
+            f"?customer-id={self.customer_id}",
+        )
         headers = {
             "Accept": "application/json",
             "Authorization": f"Bearer {self._get_bearer_token(self.token)}",
             "client_id": self.client_id,
         }
-        repsonse = requests.request("GET", url=url, headers=headers, data=payload)
-        result = self._parse_json_response(repsonse, "Interbanking balances")
+        response = await self._request("GET", url, headers=headers)
+        result = self._parse_json_response(response, "Interbanking balances")
         accounts_list = result.get("accounts")
         if accounts_list is None:
             self.error.raise_not_found(accounts_list)
@@ -222,7 +257,7 @@ class InterBankingService:
             parsed_result = {
                 **b,
                 "historial": b.get("historical_balances"),
-                "bank_name": codes[b.get("bank_number")],
+                "bank_name": codes.get(b.get("bank_number"), b.get("bank_number")),
                 "account_type": b.get("account_type"),
                 "account_number": b.get("account_number"),
                 "balance": b.get("balances").get("countable_balance"),
@@ -234,15 +269,17 @@ class InterBankingService:
 
     async def get_accounts(self):
         await self._update_token()
-        url = f"{self.ib_accounts_api_url}?customer-id={self.customer_id}"
-        payload = {}
+        url = self._build_url(
+            self.ib_accounts_api_url,
+            f"?customer-id={self.customer_id}",
+        )
         headers = {
             "Accept": "application/json",
             "Authorization": f"Bearer {self._get_bearer_token(self.token)}",
             "client_id": self.client_id,
         }
-        repsonse = requests.request("GET", url=url, headers=headers, data=payload)
-        result = self._parse_json_response(repsonse, "Interbanking accounts")
+        response = await self._request("GET", url, headers=headers)
+        result = self._parse_json_response(response, "Interbanking accounts")
         return result
 
 

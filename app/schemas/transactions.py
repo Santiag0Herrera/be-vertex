@@ -41,19 +41,9 @@ class MultipleDocumentRequest(BaseModel):
   owner_account_number: str
   document_name: Optional[str] = None
 
-class UploadDocumentRequest(BaseModel):
-  base64: str
-  name: str
-  ext: str
-
 class MovementsRequest(BaseModel):
   account_number: str
   bank_number: str
-  date_since: Optional[str]
-  date_until: Optional[str]
-
-
-class AllMovementsRequest:
   date_since: Optional[str]
   date_until: Optional[str]
 

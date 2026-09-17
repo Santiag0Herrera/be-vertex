@@ -133,7 +133,7 @@ def test_balance_list_includes_total_loaded_amount(client_balances):
 
     balances = {
         balance["id"]: jsonable_encoder(balance)
-        for balance in service.get_all()
+        for balance in service.get_all()["result"]
     }
 
     assert balances[own_balance_id]["balance_amount"] == 100
@@ -158,7 +158,7 @@ def test_balance_detail_includes_total_loaded_amount(client_balances):
     service, own_balance_id, _ = client_balances
 
     response = service.get_all_movements(own_balance_id)
-    encoded_balance = jsonable_encoder(response["data"]["balance"])
+    encoded_balance = jsonable_encoder(response["result"]["balance"])
 
     assert encoded_balance["balance_amount"] == 100
     assert encoded_balance["total_loaded_amount"] == 122.5

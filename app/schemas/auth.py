@@ -1,13 +1,4 @@
-from pydantic import BaseModel, Field
-
-class CreateUserRequest(BaseModel):
-  first_name: str
-  last_name: str
-  email: str
-  password: str
-  phone: str
-  permission_level: str
-  entity: str
+from pydantic import BaseModel
 
 class Token(BaseModel):
   access_token: str

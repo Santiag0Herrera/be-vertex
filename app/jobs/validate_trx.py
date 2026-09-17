@@ -39,7 +39,8 @@ SELECT
 FROM trx
 LEFT JOIN customers_balance ON trx.account_id = customers_balance.id
 LEFT JOIN currency ON customers_balance.balance_currency_id = currency.id
-WHERE trx.status = 'pendiente';
+WHERE trx.status = 'pendiente'
+  AND (:entity_id IS NULL OR trx.entity_id = :entity_id);
 """
 
 
@@ -56,11 +57,11 @@ def get_bank_name_from_cbu(cbu: str) -> str:
     return codes.get(bank_code, "Banco desconocido")
 
 
-def get_pending_trx():
+def get_pending_trx(entity_id=None):
     db = SessionLocal()
 
     try:
-        return db.execute(text(SQL)).mappings().all()
+        return db.execute(text(SQL), {"entity_id": entity_id}).mappings().all()
     except Exception:
         logger.exception("[ERROR] failed_to_fetch_pending_transactions")
         raise
@@ -371,7 +372,7 @@ def calculate_fee_amount(amount, fee_percentage):
     return (amount * fee_percentage / Decimal("100")).quantize(Decimal("0.01"))
 
 
-async def run() -> dict:
+async def run(entity_id=None) -> dict:
     started_at = datetime.datetime.now()
     current_time = started_at.strftime("%Y-%m-%d %H:%M:%S")
 
@@ -391,7 +392,7 @@ async def run() -> dict:
 
     accounts = accounts_model.get("accounts", [])
 
-    pending_transactions = get_pending_trx()
+    pending_transactions = get_pending_trx(entity_id=entity_id)
 
     logger.info(
         "[JOB INFO] ib_accounts=%s pending_transactions=%s",

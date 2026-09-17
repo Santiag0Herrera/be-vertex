@@ -5,16 +5,18 @@ from sqlalchemy.orm import Session
 
 from app.db.database import get_db
 from app.schemas.payment_orders import NewPaymentOrderRequest, ExecutePaymentOrderRequest
-from app.services.auth_service import get_current_user
+from app.services.auth_service import get_current_user, require_client, require_internal_user
 from app.services.PaymentOrderService import PaymentOrderService
 
 router = APIRouter(prefix="/payment-orders", tags=["Órdenes de pago"])
 db_dependency = Annotated[Session, Depends(get_db)]
 user_dependency = Annotated[dict, Depends(get_current_user)]
+client_dependency = Annotated[dict, Depends(require_client)]
+internal_dependency = Annotated[dict, Depends(require_internal_user)]
 
 
 @router.post("/create", status_code=201)
-def create(db: db_dependency, user: user_dependency, request: NewPaymentOrderRequest):
+def create(db: db_dependency, user: client_dependency, request: NewPaymentOrderRequest):
     return PaymentOrderService(db, user).create(request)
 
 
@@ -57,5 +59,5 @@ def detail(
 
 
 @router.post("/execute", status_code=201)
-def execute(db: db_dependency, user: user_dependency, request: ExecutePaymentOrderRequest):
+def execute(db: db_dependency, user: internal_dependency, request: ExecutePaymentOrderRequest):
     return PaymentOrderService(db, user).execute(request)

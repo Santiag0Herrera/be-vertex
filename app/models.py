@@ -1,8 +1,8 @@
 from datetime import datetime
 from sqlalchemy import Column, DateTime, Integer, String, Float, ForeignKey, Boolean, Numeric, CheckConstraint
-from sqlalchemy.orm import relationship, declarative_base
+from sqlalchemy.orm import relationship
 
-Base = declarative_base()
+from app.db.database import Base
 
 # User Model
 class Users(Base):
@@ -185,7 +185,7 @@ class CustomersBalance(Base):
     __tablename__ = "customers_balance"
 
     id = Column(Integer, primary_key=True, index=True)
-    client_id = Column(Integer, ForeignKey("clients.id"), unique=True, nullable=False)
+    client_id = Column(Integer, ForeignKey("clients.id"), nullable=False, index=True)
     balance_amount = Column(Float, nullable=False, default=0.0)
     fee_amount = Column(Float, nullable=False, default=0.0)
     balance_currency_id = Column(Integer, ForeignKey("currency.id"), nullable=False)

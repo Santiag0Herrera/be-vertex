@@ -1,6 +1,7 @@
-from typing import List
+import secrets
+
 from sqlalchemy import or_, select
-from app.models import Clients, Users, Permission, CustomersBalance
+from app.models import Clients, Users, Permission
 from sqlalchemy.orm import Session
 from .ErrorService import ErrorService
 from .SuccessService import SuccessService
@@ -21,13 +22,13 @@ class ClientService():
     self.success = SuccessService()
   
 
-  def get_all(self) -> List[ClientResponse]:
+  def get_all(self):
     stmt = select(Clients).where(Clients.entity_id == self.req_user.get("entity_id")).where(Clients.enabled == True)
     clients_model = self.db.execute(stmt).scalars().all()
-    return [
+    return self.success.response([
       ClientResponse.model_validate(client)
       for client in clients_model
-    ]
+    ])
 
 
   def create(self, new_client_request: NewClientRequest):
@@ -54,10 +55,17 @@ class ClientService():
     if any(client.cuit == new_client_request.cuit for client in existing_clients):
       self.error.raise_conflict(f"Ya existe un cliente con el CUIT {new_client_request.cuit}.")
     
-    auto_generated_password = (new_client_request.first_name[:2] + new_client_request.last_name + "123").lower()
+    auto_generated_password = secrets.token_urlsafe(12)
 
-    # Buscamos el id del permiso para clientes
-    clients_permission_model = self.db.query(Permission).filter(Permission.level == 'client').first()
+    requesting_permission = self.db.query(Permission).filter(
+      Permission.id == self.req_user.get('user_perm_id')
+    ).first()
+    self.error.raise_if_none(requesting_permission, "Requesting permission")
+    clients_permission_model = self.db.query(Permission).filter(
+      Permission.level == 'client',
+      Permission.product == requesting_permission.product,
+    ).first()
+    self.error.raise_if_none(clients_permission_model, "Client permission")
 
     create_client_model = Clients(
       first_name=new_client_request.first_name,
@@ -99,7 +107,11 @@ class ClientService():
     """
     Deletes client by client_id
     """
-    client_model = self.db.query(Clients).filter(Clients.id == id_client).first()
+    client_model = self.db.query(Clients).filter(
+      Clients.id == id_client,
+      Clients.entity_id == self.req_user.get("entity_id"),
+      Clients.enabled == True,
+    ).first()
 
     if client_model is None:
       self.error.raise_not_found("Cliente")
@@ -113,6 +125,7 @@ class ClientService():
   def get_current(self):
     client_model = self.db.query(Clients).filter(
         Clients.id == self.req_user.get("id"),
+        Clients.entity_id == self.req_user.get("entity_id"),
         Clients.enabled == True
     ).first()
 

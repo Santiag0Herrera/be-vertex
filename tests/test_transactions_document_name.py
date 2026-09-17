@@ -28,8 +28,15 @@ def test_create_multiple_stores_document_name_on_every_transaction():
     permission = Permission(level="client", hierarchy=1)
     currency = Currency(name="ARS")
     entity = Entity(name="Entidad", mail="entidad@example.com", status="enabled")
-    db.add_all([permission, currency, entity])
+    cbu = CBU(
+        nro="0" * 22,
+        banco="Banco",
+        alias="entidad.multiple",
+        cuit="30999999991",
+    )
+    db.add_all([permission, currency, entity, cbu])
     db.flush()
+    db.add(EntityCBU(entity_id=entity.id, cbu_id=cbu.id, currency_id=currency.id))
     client = Clients(
         first_name="Cliente",
         last_name="Prueba",

@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from fastapi import APIRouter, Depends, Body
 from app.db.database import get_db
 from starlette import status
-from app.services.auth_service import get_current_user
+from app.services.auth_service import require_admin_user, require_internal_user
 from app.schemas.users import ChangePasswordRequest, CreateUserRequest, ChangePermissonRequest, ChangeUserInfoRequest
 from app.services.DBService import DBService
 
@@ -13,10 +13,11 @@ router = APIRouter(
 )
 
 db_dependency = Annotated[Session, Depends(get_db)]
-user_dependency = Annotated[dict, Depends(get_current_user)]
+user_dependency = Annotated[dict, Depends(require_internal_user)]
+admin_dependency = Annotated[dict, Depends(require_admin_user)]
 
 @router.get("/all", status_code=status.HTTP_200_OK)
-async def get_users(db: db_dependency, user: user_dependency):
+async def get_users(db: db_dependency, user: admin_dependency):
   db_service = DBService(db=db, req_user=user)
   users = db_service.users.get_all()
   return users
@@ -36,21 +37,21 @@ async def change_password(user: user_dependency, db: db_dependency, change_passw
 
 
 @router.post("/newUser", status_code=status.HTTP_201_CREATED)
-async def create_new_user(user: user_dependency, db: db_dependency, create_user_request: CreateUserRequest):
+async def create_new_user(user: admin_dependency, db: db_dependency, create_user_request: CreateUserRequest):
   db_service = DBService(db=db, req_user=user)
   create_user_model = db_service.users.create(create_user_request)
   return create_user_model
 
 
 @router.delete("/delete", status_code=status.HTTP_200_OK)
-async def delete_user(user: user_dependency, db: db_dependency, user_id: int):
+async def delete_user(user: admin_dependency, db: db_dependency, user_id: int):
   db_service = DBService(db=db, req_user=user)
   delete_user_model = db_service.users.delete(user_id)
   return delete_user_model
 
 
 @router.put("/changePermisson", status_code=status.HTTP_200_OK)
-async def change_permisson(user: user_dependency, db: db_dependency, change_permisson_request: ChangePermissonRequest):
+async def change_permisson(user: admin_dependency, db: db_dependency, change_permisson_request: ChangePermissonRequest):
   db_service = DBService(db=db, req_user=user)
   change_perm_model = db_service.users.change_permission(change_permisson_request)
   return change_perm_model

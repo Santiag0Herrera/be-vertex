@@ -1,3 +1,5 @@
+import secrets
+
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from app.models import Users, Permission, Clients
@@ -18,10 +20,10 @@ class UserService():
       """
       Gets all users from them same requesting users's entity.
       """
-      users_model = self.db.query(Users).filter(
+      users_model = self.db.query(Users).join(Permission).filter(
         Users.entity_id == self.req_user.get('entity_id'),
         Users.enabled == True,
-        Users.perm_id != 4 # Exclude super admin users
+        Permission.level != 'super',
       ).all()
 
       self.error.raise_if_none(users_model)
@@ -46,6 +48,7 @@ class UserService():
     """
     user_model = self.db.query(Users).filter(
       Users.id == self.req_user.get('id'),
+      Users.entity_id == self.req_user.get('entity_id'),
       Users.enabled == True
     ).first()
     
@@ -70,8 +73,12 @@ class UserService():
     Changes requesting user's password
     """
     user_model = self.db.query(Users).filter(
-      Users.id == self.req_user.get('id')
+      Users.id == self.req_user.get('id'),
+      Users.entity_id == self.req_user.get('entity_id'),
+      Users.enabled == True,
     ).first() # func.lower(Users.email) → genera LOWER(email) en la query SQL.
+
+    self.error.raise_if_none(user_model, "User")
 
     if not bcrypt_context.verify(change_password_request.password, user_model.hashed_password):
       self.error.raise_unauthorized('Incorrect password')
@@ -92,10 +99,17 @@ class UserService():
     if user_exists_model or client_exists_model:
       self.error.raise_conflict(f"Usuario {create_user_request.email} ya existe.")
     
-    auto_generated_password = (create_user_request.first_name[:2] + create_user_request.last_name + "123").lower()
+    auto_generated_password = secrets.token_urlsafe(12)
 
-    # Buscamos el id del permiso para usuarios
-    users_permission_model = self.db.query(Permission).filter(Permission.level == 'users').first()
+    requesting_permission = self.db.query(Permission).filter(
+      Permission.id == self.req_user.get('user_perm_id')
+    ).first()
+    self.error.raise_if_none(requesting_permission, "Requesting permission")
+    users_permission_model = self.db.query(Permission).filter(
+      Permission.level.in_(['user', 'users']),
+      Permission.product == requesting_permission.product,
+    ).order_by((Permission.level == 'user').desc()).first()
+    self.error.raise_if_none(users_permission_model, "User permission")
 
     create_user_model = Users(
       first_name=create_user_request.first_name,
@@ -115,16 +129,14 @@ class UserService():
     if self.req_user.get("id") == user_id:
       self.error.raise_conflict("You can not delete your own user account.")
   
-    user_model = self.db.query(Users).filter(Users.id == user_id).first()
+    user_model = self.db.query(Users).filter(
+      Users.id == user_id,
+      Users.entity_id == self.req_user.get('entity_id'),
+      Users.enabled == True,
+    ).first()
 
     if user_model is None:
       self.error.raise_bad_request(f"User N°: {user_id} does not exist.")
-    
-    # Buscamos el id del permiso para clientes
-    clients_permission_model = self.db.query(Permission).filter(Permission.level == 'client').first()
-
-    if user_model.perm_id == clients_permission_model.id:
-      self.error.raise_bad_request("The account is a client type.")
     
     user_model.enabled = False
     self.db.add(user_model)
@@ -137,14 +149,31 @@ class UserService():
       self.error.raise_bad_request("User can not change his own permission.")
     
     user_model = self.db.query(Users).filter(
-      Users.id == change_permisson_request.user_id
+      Users.id == change_permisson_request.user_id,
+      Users.entity_id == self.req_user.get('entity_id'),
+      Users.enabled == True,
     ).first()
     self.error.raise_if_none(user_model, f"User")
     
-    if user_model.perm_id == change_permisson_request.perm_id:
+    permission_model = self.db.query(Permission).filter(
+      Permission.id == change_permisson_request.perm_id,
+    ).first()
+    self.error.raise_if_none(permission_model, "Permission")
+
+    requester_permission = self.db.query(Permission).filter(
+      Permission.id == self.req_user.get('user_perm_id'),
+    ).first()
+    if (
+      requester_permission is None
+      or permission_model.product != requester_permission.product
+      or permission_model.hierarchy > requester_permission.hierarchy
+    ):
+      self.error.raise_forbidden("Permission can not be assigned.")
+
+    if user_model.perm_id == permission_model.id:
       return self.error.raise_bad_request("User already has the selected permisson.")
 
-    user_model.perm_id = change_permisson_request.perm_id
+    user_model.perm_id = permission_model.id
     self.db.add(user_model)
     self.db.commit()
     return self.success.response("Permisson changed successfully!")
@@ -152,7 +181,9 @@ class UserService():
 
   def change_info(self, change_user_info_request: ChangeUserInfoRequest):
     user_model = self.db.query(Users).filter(
-      Users.id == self.req_user.get('id')
+      Users.id == self.req_user.get('id'),
+      Users.entity_id == self.req_user.get('entity_id'),
+      Users.enabled == True,
     ).first()
     self.error.raise_if_none(user_model, f"User")
     
@@ -163,6 +194,4 @@ class UserService():
     self.db.commit()
 
     return self.success.response("User info updated")
-
-
 

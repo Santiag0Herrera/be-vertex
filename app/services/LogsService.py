@@ -1,8 +1,8 @@
 from .ErrorService import ErrorService
 from .SuccessService import SuccessService
 from sqlalchemy.orm import Session
-from sqlalchemy import desc
-from app.models import Logs
+from sqlalchemy import desc, or_, select
+from app.models import Clients, Logs, Users
 
 
 class LogsService:
@@ -14,5 +14,14 @@ class LogsService:
 
     def get_all(self):
         """Returns the 20 most recent logs for the requesting user's entity."""
-        logs = self.db.query(Logs).order_by(desc(Logs.datetime)).limit(20).all()
+        entity_id = self.req_user.get("entity_id")
+        user_emails = select(Users.email).where(Users.entity_id == entity_id)
+        client_cuits = select(Clients.cuit).where(Clients.entity_id == entity_id)
+        logs = (
+            self.db.query(Logs)
+            .filter(or_(Logs.username.in_(user_emails), Logs.username.in_(client_cuits)))
+            .order_by(desc(Logs.datetime))
+            .limit(20)
+            .all()
+        )
         return self.success.response(list(reversed(logs)))

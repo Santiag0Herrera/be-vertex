@@ -75,7 +75,7 @@ CREATE TABLE IF NOT EXISTS clients (
 
 CREATE TABLE IF NOT EXISTS customers_balance (
     id SERIAL PRIMARY KEY,
-    client_id INTEGER UNIQUE NOT NULL REFERENCES clients(id),
+    client_id INTEGER NOT NULL REFERENCES clients(id),
     balance_amount DOUBLE PRECISION NOT NULL DEFAULT 0.0,
     fee_amount DOUBLE PRECISION NOT NULL DEFAULT 0.0,
     balance_currency_id INTEGER NOT NULL REFERENCES currency(id),
@@ -149,6 +149,7 @@ CREATE INDEX IF NOT EXISTS idx_users_entity_id ON users(entity_id);
 CREATE INDEX IF NOT EXISTS idx_clients_perm_id ON clients(perm_id);
 CREATE INDEX IF NOT EXISTS idx_clients_entity_id ON clients(entity_id);
 CREATE INDEX IF NOT EXISTS idx_customers_balance_currency_id ON customers_balance(balance_currency_id);
+CREATE INDEX IF NOT EXISTS idx_customers_balance_client_id ON customers_balance(client_id);
 CREATE INDEX IF NOT EXISTS idx_fee_withdrawals_balance_id ON fee_withdrawals(customer_balance_id);
 CREATE INDEX IF NOT EXISTS idx_fee_withdrawals_user_id ON fee_withdrawals(withdrawn_by_user_id);
 CREATE INDEX IF NOT EXISTS idx_fee_withdrawals_entity_id ON fee_withdrawals(entity_id);
