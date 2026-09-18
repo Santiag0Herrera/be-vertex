@@ -276,12 +276,7 @@ async def get_all_movements(
 
 
 @router.get("/get_accounts", status_code=status.HTTP_200_OK)
-async def get_accounts(db: db_dependency, user: internal_dependency):
+async def get_accounts(user: internal_dependency):
     ib_service = InterBankingService()
     accounts_model = await ib_service.get_accounts_only()
-    return SuccessService.response(
-        _filter_entity_accounts(
-            accounts_model,
-            _entity_cbus(db, user["entity_id"]),
-        )
-    )
+    return SuccessService.response(accounts_model)

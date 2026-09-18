@@ -239,16 +239,17 @@ class TransactionsService:
         receptor_account_number = multiple_trx_request.owner_account_number
         if not receptor_account_number:
             self.error.raise_bad_request("Owner account number is required")
-        owner_account = (
-            self.db.query(EntityCBU)
-            .join(CBU, EntityCBU.cbu_id == CBU.id)
-            .filter(
-                EntityCBU.entity_id == self.req_user.get("entity_id"),
-                CBU.nro == receptor_account_number,
+        if self.req_user.get("account_type") == "client":
+            owner_account = (
+                self.db.query(EntityCBU)
+                .join(CBU, EntityCBU.cbu_id == CBU.id)
+                .filter(
+                    EntityCBU.entity_id == self.req_user.get("entity_id"),
+                    CBU.nro == receptor_account_number,
+                )
+                .first()
             )
-            .first()
-        )
-        self.error.raise_if_none(owner_account, "Owner account")
+            self.error.raise_if_none(owner_account, "Owner account")
         new_trx = []
         for doc in multiple_trx_request.transactions:
             emisor_name = doc.emisor_name or entity_model.name
