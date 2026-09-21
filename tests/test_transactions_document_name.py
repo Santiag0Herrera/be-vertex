@@ -56,7 +56,7 @@ def test_create_multiple_stores_document_name_on_every_transaction():
 
     request = MultipleDocumentRequest(
         account_id=account.id,
-        owner_account_number="0" * 22,
+        owner_account_number="09170210248397",
         document_name="transferencias-agosto.pdf",
         transactions=[
             DocumentRequest(amount=100, date=date(2026, 8, 27)),
@@ -64,12 +64,18 @@ def test_create_multiple_stores_document_name_on_every_transaction():
         ],
     )
 
-    TransactionsService(db, {"entity_id": entity.id}).create_multiple(request)
+    TransactionsService(
+        db,
+        {"entity_id": entity.id, "account_type": "user"},
+    ).create_multiple(request)
 
     assert [trx.document_name for trx in db.query(Trx).all()] == [
         "transferencias-agosto.pdf",
         "transferencias-agosto.pdf",
     ]
+    assert {trx.receptor_cbu for trx in db.query(Trx).all()} == {
+        "09170210248397"
+    }
     db.close()
 
 

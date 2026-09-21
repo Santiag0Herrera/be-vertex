@@ -49,3 +49,46 @@ def test_interbanking_accounts_are_filtered_by_entity_cbu():
     ]
 
     assert _filter_entity_accounts(accounts, {"000123"}) == [accounts[0]]
+
+
+@pytest.mark.asyncio
+async def test_get_movement_keeps_all_required_query_parameters(monkeypatch):
+    captured_request = {}
+
+    async def skip_token_refresh():
+        return None
+
+    async def capture_request(method, url, **kwargs):
+        captured_request.update(method=method, url=url, kwargs=kwargs)
+        return httpx.Response(
+            200,
+            json={"movements_detail": []},
+            request=httpx.Request(method, url, params=kwargs.get("params")),
+        )
+
+    service = InterBankingService()
+    service.ib_api_url = "https://interbanking.example.test/accounts/"
+    service.customer_id = "CODIGO_ABONADO"
+    service.client_id = "CLIENT_ID"
+    service.token = "ACCESS_TOKEN"
+    monkeypatch.setattr(service, "_update_token", skip_token_refresh)
+    monkeypatch.setattr(service, "_request", capture_request)
+
+    await service.get_movement(
+        account_number="0430509162",
+        bank_number="015",
+        date_since="2026-09-18",
+        date_until="2026-09-21",
+    )
+
+    request = httpx.Request(
+        captured_request["method"],
+        captured_request["url"],
+        params=captured_request["kwargs"]["params"],
+    )
+
+    assert request.url.params["bank-number"] == "015"
+    assert request.url.params["customer-id"] == "CODIGO_ABONADO"
+    assert request.url.params["date-since"] == "2026-09-18"
+    assert request.url.params["date-until"] == "2026-09-21"
+    assert request.url.params["limit"] == "1000"

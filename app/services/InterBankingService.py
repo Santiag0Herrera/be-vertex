@@ -149,18 +149,23 @@ class InterBankingService:
         await self._update_token()
         url = self._build_url(
             self.ib_api_url,
-            f"{account_number}/movements/anteriores?bank-number={bank_number}&customer-id={self.customer_id}",
+            f"{account_number}/movements/anteriores",
         )
+        params = {
+            "bank-number": bank_number,
+            "customer-id": self.customer_id,
+            "limit": 1000,
+        }
         if date_since:
-            url += f"&date-since={date_since}"
+            params["date-since"] = date_since
         if date_until:
-            url += f"&date-until={date_until}"
+            params["date-until"] = date_until
         headers = {
             "Accept": "application/json",
             "Authorization": f"Bearer {self._get_bearer_token(self.token)}",
             "client_id": self.client_id,
         }
-        response = await self._request("GET", url, headers=headers, params={"limit": 1000})
+        response = await self._request("GET", url, headers=headers, params=params)
 
         result = self._parse_json_response(response, "Interbanking movements")
         return result
