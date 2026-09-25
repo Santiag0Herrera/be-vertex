@@ -114,6 +114,7 @@ CREATE TABLE IF NOT EXISTS trx (
     client_id INTEGER REFERENCES clients(id),
     amount DOUBLE PRECISION NOT NULL,
     date TIMESTAMP WITHOUT TIME ZONE NOT NULL,
+    received_date DATE NOT NULL DEFAULT ((CURRENT_TIMESTAMP AT TIME ZONE 'America/Argentina/Buenos_Aires')::date),
     creation_date TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     status VARCHAR(255) NOT NULL,
     account_id INTEGER NOT NULL REFERENCES customers_balance(id),

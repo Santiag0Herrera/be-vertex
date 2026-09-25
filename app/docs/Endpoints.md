@@ -47,10 +47,10 @@ No hay endpoint de alta, modificación ni baja de entidades. Esa administración
 
 - `POST /trx/reconcile-pending`
 - `GET /trx/all`
-- `GET /trx/report.csv` — reporte CSV para usuarios internos; admite `month`, `date_from`, `date_to` (sobre la fecha de carga), `status`, `client_id` y múltiples `account_ids`.
+- `GET /trx/report.csv` — reporte CSV para usuarios internos; admite `month`, `date_from`, `date_to` (sobre la fecha de recepción del cliente), `status`, `client_id` y múltiples `account_ids`.
 - `GET /trx/all_by_client` — sólo el cliente autenticado.
-- `POST /trx/new`
-- `POST /trx/multiple/new`
+- `POST /trx/new` — acepta `received_date` opcional; si se omite usa la fecha actual de Argentina.
+- `POST /trx/multiple/new` — cada transacción acepta `received_date` opcional; si se omite usa la fecha actual de Argentina.
 - `GET /trx/get_movement`
 - `POST /trx/get_movements`
 - `GET /trx/get_owner_accounts`

@@ -1,6 +1,10 @@
 from pydantic import BaseModel, Field, field_validator
 from datetime import date as dt_date, datetime
 from typing import Optional
+from zoneinfo import ZoneInfo
+
+
+BUSINESS_TIMEZONE = ZoneInfo("America/Argentina/Buenos_Aires")
 
 class DocumentRequest(BaseModel):
   document_name: Optional[str] = None
@@ -13,11 +17,17 @@ class DocumentRequest(BaseModel):
   receptor_cuit: Optional[str] = None
   receptor_cbu: Optional[str] = None
   date: dt_date = Field(..., description="Transaction date in YYYY-MM-DD format")
+  received_date: Optional[dt_date] = Field(
+    None,
+    description="Date when the receipt was received from the client in YYYY-MM-DD format",
+  )
   account_id: Optional[int] = None
 
-  @field_validator("date", mode="before")
+  @field_validator("date", "received_date", mode="before")
   @classmethod
   def normalize_date(cls, value):
+    if value is None:
+      return value
     if isinstance(value, datetime):
       return value.date()
     if isinstance(value, str):
@@ -32,6 +42,13 @@ class DocumentRequest(BaseModel):
         return datetime.strptime(raw, "%Y-%m-%d").date()
       except ValueError:
         pass
+    return value
+
+  @field_validator("received_date")
+  @classmethod
+  def validate_received_date(cls, value):
+    if value is not None and value > datetime.now(BUSINESS_TIMEZONE).date():
+      raise ValueError("La fecha de recepción no puede ser futura")
     return value
 
 

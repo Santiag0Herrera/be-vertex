@@ -1,6 +1,6 @@
 import csv
 import io
-from datetime import date, datetime, time, timedelta
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from itertools import groupby
 
@@ -76,9 +76,9 @@ class TransactionReportService:
         )
 
         if range_start is not None:
-            query = query.filter(Trx.creation_date >= datetime.combine(range_start, time.min))
+            query = query.filter(Trx.received_date >= range_start)
         if range_end is not None:
-            query = query.filter(Trx.creation_date < datetime.combine(range_end, time.min))
+            query = query.filter(Trx.received_date < range_end)
         if normalized_status:
             query = query.filter(Trx.status == normalized_status)
         if client_id is not None:
@@ -86,7 +86,11 @@ class TransactionReportService:
         if selected_accounts:
             query = query.filter(Trx.account_id.in_(selected_accounts))
 
-        transactions = query.order_by(Trx.creation_date.asc(), Trx.id.asc()).all()
+        transactions = query.order_by(
+            Trx.received_date.asc(),
+            Trx.creation_date.asc(),
+            Trx.id.asc(),
+        ).all()
         if not transactions:
             raise HTTPException(
                 status_code=http_status.HTTP_404_NOT_FOUND,
@@ -188,7 +192,7 @@ class TransactionReportService:
 
         for transaction_date, daily_transactions in groupby(
             transactions,
-            key=lambda transaction: transaction.creation_date.date(),
+            key=lambda transaction: transaction.received_date,
         ):
             daily_total = Decimal("0")
             for transaction in daily_transactions:

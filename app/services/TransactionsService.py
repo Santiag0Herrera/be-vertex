@@ -1,4 +1,5 @@
 import datetime
+from zoneinfo import ZoneInfo
 
 from sqlalchemy.orm import Session, joinedload
 from app.models import Trx, CBU, Entity, CustomersBalance, EntityCBU, Clients
@@ -15,6 +16,7 @@ from .ResponseSerializationService import ResponseSerializationService
 
 
 class TransactionsService:
+    BUSINESS_TIMEZONE = ZoneInfo("America/Argentina/Buenos_Aires")
     db: Session
     req_user: dict
     error: ErrorService
@@ -80,6 +82,9 @@ class TransactionsService:
             return parsed_value
 
         self.error.raise_bad_request("Invalid date value.")
+
+    def _received_date(self, value):
+        return value or datetime.datetime.now(self.BUSINESS_TIMEZONE).date()
 
     def get_all(
         self,
@@ -157,7 +162,11 @@ class TransactionsService:
         total_records = base_query.count()
 
         transactions_model = (
-            base_query.order_by(Trx.creation_date.desc(), Trx.id.desc())
+            base_query.order_by(
+                Trx.received_date.desc(),
+                Trx.creation_date.desc(),
+                Trx.id.desc(),
+            )
             .offset(offset)
             .limit(recordsPerPage)
             .all()
@@ -219,6 +228,7 @@ class TransactionsService:
             client_id=account_model.client_id,
             amount=document_request.amount,
             date=document_request.date,
+            received_date=self._received_date(document_request.received_date),
             creation_date=datetime.datetime.utcnow(),
             trx_id=document_request.trx_id,
             account_id=document_request.account_id,
@@ -265,6 +275,7 @@ class TransactionsService:
                 client_id=account_model.client_id,
                 amount=doc.amount,
                 date=doc.date,
+                received_date=self._received_date(doc.received_date),
                 trx_id=f"AUTO-{uuid.uuid4().hex[:16].upper()}",
                 account_id=multiple_trx_request.account_id,
                 status="pendiente",
@@ -317,7 +328,11 @@ class TransactionsService:
 
         total_records = base_query.count()
         transactions_model = (
-            base_query.order_by(Trx.creation_date.desc(), Trx.id.desc())
+            base_query.order_by(
+                Trx.received_date.desc(),
+                Trx.creation_date.desc(),
+                Trx.id.desc(),
+            )
             .offset(offset)
             .limit(recordsPerPage)
             .all()

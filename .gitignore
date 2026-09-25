@@ -91,3 +91,5 @@ cover/
 local_settings.py
 # Migración requerida para órdenes de pago
 !migrations/20260908_payment_orders.sql
+# Migración requerida para la fecha de recepción de comprobantes
+!migrations/20260925_transaction_received_date.sql

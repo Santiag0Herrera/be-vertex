@@ -1,8 +1,13 @@
 from datetime import datetime
-from sqlalchemy import Column, DateTime, Integer, String, Float, ForeignKey, Boolean, Numeric, CheckConstraint
+from zoneinfo import ZoneInfo
+from sqlalchemy import Column, Date, DateTime, Integer, String, Float, ForeignKey, Boolean, Numeric, CheckConstraint
 from sqlalchemy.orm import relationship
 
 from app.db.database import Base
+
+
+def business_today():
+    return datetime.now(ZoneInfo("America/Argentina/Buenos_Aires")).date()
 
 # User Model
 class Users(Base):
@@ -96,6 +101,7 @@ class Trx(Base):
     client_id = Column(Integer, ForeignKey("clients.id"))
     amount = Column(Float, nullable=False)
     date = Column(DateTime, nullable=False)
+    received_date = Column(Date, nullable=False, default=business_today)
     creation_date = Column(DateTime, default=datetime.utcnow)
     status = Column(String, nullable=False)
     account_id = Column(Integer, ForeignKey("customers_balance.id"), nullable=False)

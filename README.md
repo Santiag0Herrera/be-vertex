@@ -90,7 +90,7 @@ Las excepciones deliberadas son `POST /auth/token`, por el contrato OAuth2; los 
 
 `GET /trx/report.csv` genera el reporte operativo de comprobantes para usuarios internos. Acepta filtros opcionales por `month` (`AAAA-MM`), `date_from`, `date_to`, `status`, `client_id` y uno o más `account_ids`. Si se indica un cliente sin cuentas, se incluyen todas sus cuentas; si además se indican cuentas, todas deben pertenecer a ese cliente.
 
-El reporte queda limitado a la entidad del usuario autenticado, se ordena y agrupa por fecha de carga, e informa además la fecha del comprobante. Agrega una fila de total al final de cada fecha. Se entrega en UTF-8 con BOM, separador punto y coma y saltos CRLF para facilitar su apertura directa en Excel. Si no hay resultados, responde HTTP 404 con un error JSON estándar.
+El reporte queda limitado a la entidad del usuario autenticado, se ordena y agrupa por `received_date` (fecha en que el comprobante fue recibido del cliente), e informa además la fecha del comprobante. `creation_date` conserva el momento real de alta en Vertex como dato de auditoría. Agrega una fila de total al final de cada fecha. Se entrega en UTF-8 con BOM, separador punto y coma y saltos CRLF para facilitar su apertura directa en Excel. Si no hay resultados, responde HTTP 404 con un error JSON estándar.
 
 ## Interbanking
 

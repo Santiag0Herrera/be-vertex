@@ -59,6 +59,7 @@ class ResponseSerializationService:
       "client_id": transaction.client_id,
       "amount": transaction.amount,
       "date": transaction.date,
+      "received_date": transaction.received_date,
       "creation_date": transaction.creation_date,
       "status": transaction.status,
       "account_id": transaction.account_id,

@@ -1,6 +1,8 @@
-from datetime import date
+from datetime import date, timedelta
 
+import pytest
 from fastapi.encoders import jsonable_encoder
+from pydantic import ValidationError
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
@@ -18,6 +20,15 @@ from app.models import (
 )
 from app.schemas.transactions import DocumentRequest, MultipleDocumentRequest
 from app.services.TransactionsService import TransactionsService
+
+
+def test_document_request_rejects_a_future_received_date():
+    with pytest.raises(ValidationError):
+        DocumentRequest(
+            amount=100,
+            date=date.today(),
+            received_date=date.today() + timedelta(days=1),
+        )
 
 
 def test_create_multiple_stores_document_name_on_every_transaction():
@@ -59,8 +70,16 @@ def test_create_multiple_stores_document_name_on_every_transaction():
         owner_account_number="09170210248397",
         document_name="transferencias-agosto.pdf",
         transactions=[
-            DocumentRequest(amount=100, date=date(2026, 8, 27)),
-            DocumentRequest(amount=200, date=date(2026, 8, 27)),
+            DocumentRequest(
+                amount=100,
+                date=date(2026, 8, 27),
+                received_date=date(2026, 8, 26),
+            ),
+            DocumentRequest(
+                amount=200,
+                date=date(2026, 8, 27),
+                received_date=date(2026, 8, 26),
+            ),
         ],
     )
 
@@ -75,6 +94,9 @@ def test_create_multiple_stores_document_name_on_every_transaction():
     ]
     assert {trx.receptor_cbu for trx in db.query(Trx).all()} == {
         "09170210248397"
+    }
+    assert {trx.received_date for trx in db.query(Trx).all()} == {
+        date(2026, 8, 26)
     }
     db.close()
 
@@ -139,6 +161,7 @@ def test_create_individual_stores_document_name():
         emisor_cuit="20123456789",
         receptor_cuit=cbu.cuit,
         date=date(2026, 8, 27),
+        received_date=date(2026, 8, 26),
         account_id=account.id,
     )
 
@@ -147,6 +170,7 @@ def test_create_individual_stores_document_name():
     transaction = db.query(Trx).one()
     assert transaction.document_name == "comprobante-individual.pdf"
     assert transaction.client_id == client.id
+    assert transaction.received_date == date(2026, 8, 26)
     db.close()
 
 
