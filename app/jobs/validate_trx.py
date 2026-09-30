@@ -4,6 +4,7 @@ import asyncio
 import datetime
 import hashlib
 import logging
+from collections import Counter, defaultdict
 from decimal import Decimal
 
 from dotenv import load_dotenv
@@ -40,8 +41,25 @@ FROM trx
 LEFT JOIN customers_balance ON trx.account_id = customers_balance.id
 LEFT JOIN currency ON customers_balance.balance_currency_id = currency.id
 WHERE trx.status = 'pendiente'
-  AND (:entity_id IS NULL OR trx.entity_id = :entity_id);
+  AND (:entity_id IS NULL OR trx.entity_id = :entity_id)
+ORDER BY trx.creation_date ASC, trx.id ASC;
 """
+
+
+STRONG_MOVEMENT_IDENTIFIER_FIELDS = (
+    "voucher_number",
+    "correlative_number",
+)
+EMPTY_MOVEMENT_IDENTIFIER_VALUES = {
+    "",
+    "-",
+    "N/A",
+    "NA",
+    "NONE",
+    "NULL",
+    "S/D",
+    "SIN DATOS",
+}
 
 
 def normalize_account(value):
@@ -138,6 +156,32 @@ def build_interbanking_fingerprint(movement, bank_number, account_number):
     return hashlib.sha256(stable_key.encode("utf-8")).hexdigest()
 
 
+def has_strong_movement_identifier(movement):
+    """Return whether Interbanking supplied a reference expected to be unique."""
+    for field in STRONG_MOVEMENT_IDENTIFIER_FIELDS:
+        value = normalize_fingerprint_value(movement.get(field))
+        if value in EMPTY_MOVEMENT_IDENTIFIER_VALUES:
+            continue
+        if value.isdigit() and set(value) == {"0"}:
+            continue
+        return True
+    return False
+
+
+def build_fingerprint_slot(base_fingerprint, slot_number):
+    """Build a stable identity for one of several indistinguishable movements.
+
+    Slot one keeps the legacy fingerprint so existing reconciliations remain valid.
+    The total number of slots is deliberately not persisted because Interbanking may
+    return a partial result on a later request.
+    """
+    if slot_number < 1:
+        raise ValueError("slot_number must be greater than zero")
+    if slot_number == 1:
+        return base_fingerprint
+    return f"{base_fingerprint}:{slot_number}"
+
+
 def find_trx_by_fingerprint(document_fingerprint, current_trx_id):
     db = SessionLocal()
     try:
@@ -181,6 +225,7 @@ def match_trx_with_ib(
     trx_date = trx["trx_date"].date()
     valid_movement_dates = set(valid_movement_dates or [trx_date])
     duplicated_match = None
+    matching_movements = []
 
     for mov in ib_movements:
         mov_amount = normalize_amount(mov.get("amount"))
@@ -206,35 +251,84 @@ def match_trx_with_ib(
             )
 
         if amount_matches and date_matches and type_matches:
-            document_fingerprint = build_interbanking_fingerprint(
+            base_fingerprint = build_interbanking_fingerprint(
                 mov,
                 bank_number=bank_number,
                 account_number=account_number,
             )
-            duplicated_trx = find_trx_by_fingerprint(
-                document_fingerprint=document_fingerprint,
-                current_trx_id=trx["trx_id"],
+            matching_movements.append(
+                {
+                    "movement": mov,
+                    "base_fingerprint": base_fingerprint,
+                    "has_strong_identifier": has_strong_movement_identifier(mov),
+                }
             )
-            matched_result = {
-                "movement": mov,
-                "document_fingerprint": document_fingerprint,
-                "duplicated_trx": duplicated_trx,
-            }
 
-            if duplicated_trx:
-                logger.info(
-                    "[IB MATCH USED] trx_id=%s duplicate_of=%s fingerprint=%s voucher_number=%s customer_cuit=%s",
-                    trx["trx_id"],
-                    duplicated_trx.get("trx_id"),
-                    document_fingerprint,
-                    mov.get("voucher_number"),
-                    mov.get("customer_cuit"),
-                )
-                if duplicated_match is None:
-                    duplicated_match = matched_result
+    ambiguous_totals = Counter(
+        candidate["base_fingerprint"]
+        for candidate in matching_movements
+        if not candidate["has_strong_identifier"]
+    )
+    ambiguous_occurrences = defaultdict(int)
+    seen_strong_fingerprints = set()
+
+    for candidate in matching_movements:
+        mov = candidate["movement"]
+        base_fingerprint = candidate["base_fingerprint"]
+
+        if candidate["has_strong_identifier"]:
+            # Identical rows carrying the same bank reference are the same
+            # movement repeated in the API response, not additional capacity.
+            if base_fingerprint in seen_strong_fingerprints:
                 continue
+            seen_strong_fingerprints.add(base_fingerprint)
+            slot_number = 1
+            total_slots = 1
+        else:
+            ambiguous_occurrences[base_fingerprint] += 1
+            slot_number = ambiguous_occurrences[base_fingerprint]
+            total_slots = ambiguous_totals[base_fingerprint]
 
-            return matched_result
+        document_fingerprint = build_fingerprint_slot(
+            base_fingerprint,
+            slot_number,
+        )
+        duplicated_trx = find_trx_by_fingerprint(
+            document_fingerprint=document_fingerprint,
+            current_trx_id=trx["trx_id"],
+        )
+        matched_result = {
+            "movement": mov,
+            "document_fingerprint": document_fingerprint,
+            "duplicated_trx": duplicated_trx,
+            "fingerprint_slot": slot_number,
+            "fingerprint_total_slots": total_slots,
+        }
+
+        if duplicated_trx:
+            logger.info(
+                "[IB MATCH USED] trx_id=%s duplicate_of=%s fingerprint=%s slot=%s/%s voucher_number=%s customer_cuit=%s",
+                trx["trx_id"],
+                duplicated_trx.get("trx_id"),
+                document_fingerprint,
+                slot_number,
+                total_slots,
+                mov.get("voucher_number"),
+                mov.get("customer_cuit"),
+            )
+            # Keep the last occupied slot so an exhausted group is reported as
+            # N/N instead of looking like it failed at its first occurrence.
+            duplicated_match = matched_result
+            continue
+
+        logger.info(
+            "[IB MATCH AVAILABLE] trx_id=%s fingerprint=%s slot=%s/%s",
+            trx["trx_id"],
+            document_fingerprint,
+            slot_number,
+            total_slots,
+        )
+        return matched_result
 
     if duplicated_match:
         return duplicated_match
@@ -505,15 +599,21 @@ async def run(entity_id=None) -> dict:
                     matched_movement = matched_result["movement"]
                     document_fingerprint = matched_result["document_fingerprint"]
                     duplicated_trx = matched_result["duplicated_trx"]
+                    fingerprint_slot = matched_result["fingerprint_slot"]
+                    fingerprint_total_slots = matched_result[
+                        "fingerprint_total_slots"
+                    ]
 
                     logger.info(
-                        "[MATCH] trx_id=%s trx_amount=%s ib_amount=%s trx_date=%s ib_date=%s fingerprint=%s",
+                        "[MATCH] trx_id=%s trx_amount=%s ib_amount=%s trx_date=%s ib_date=%s fingerprint=%s slot=%s/%s",
                         trx_id,
                         trx_amount,
                         matched_movement.get("amount"),
                         trx_date,
                         matched_movement.get("movement_date"),
                         document_fingerprint,
+                        fingerprint_slot,
+                        fingerprint_total_slots,
                     )
 
                     if duplicated_trx:
@@ -525,10 +625,12 @@ async def run(entity_id=None) -> dict:
                         if updated:
                             repeated_trx_count += 1
                             logger.warning(
-                                "[TRX UPDATED] trx_id=%s status=repetida duplicate_of=%s duplicate_status=%s",
+                                "[TRX UPDATED] trx_id=%s status=repetida duplicate_of=%s duplicate_status=%s capacity_exhausted=%s/%s",
                                 trx_id,
                                 duplicated_trx.get("trx_id"),
                                 duplicated_trx.get("status"),
+                                fingerprint_total_slots,
+                                fingerprint_total_slots,
                             )
                         else:
                             skipped_trx_count += 1
