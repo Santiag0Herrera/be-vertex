@@ -1,3 +1,5 @@
+import asyncio
+
 import httpx
 import pytest
 from fastapi import HTTPException
@@ -128,6 +130,36 @@ async def test_reconciliation_accounts_fall_back_to_balances(monkeypatch):
     accounts = await service.get_reconciliation_accounts()
 
     assert accounts[0]["account_number"] == "123"
+
+
+@pytest.mark.asyncio
+async def test_concurrent_services_share_a_single_token_refresh(monkeypatch):
+    monkeypatch.setattr(InterBankingService, "_shared_token", None)
+    monkeypatch.setattr(
+        InterBankingService,
+        "_is_token_expired",
+        staticmethod(lambda token: token != "VALID-TOKEN"),
+    )
+    first_service = InterBankingService()
+    second_service = InterBankingService()
+    authentications = []
+
+    async def authenticate_once():
+        authentications.append(True)
+        await asyncio.sleep(0)
+        return "VALID-TOKEN"
+
+    monkeypatch.setattr(first_service, "_authenticate", authenticate_once)
+    monkeypatch.setattr(second_service, "_authenticate", authenticate_once)
+
+    await asyncio.gather(
+        first_service._update_token(),
+        second_service._update_token(),
+    )
+
+    assert len(authentications) == 1
+    assert first_service.token == "VALID-TOKEN"
+    assert second_service.token == "VALID-TOKEN"
 
 
 def test_interbanking_accounts_are_filtered_by_entity_cbu():

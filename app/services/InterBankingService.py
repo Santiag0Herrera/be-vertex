@@ -20,6 +20,8 @@ logger = logging.getLogger(__name__)
 class InterBankingService:
     RETRYABLE_STATUS_CODES = {408, 429, 500, 502, 503, 504}
     MOVEMENT_RESULT_LIMIT = 1000
+    _token_lock = asyncio.Lock()
+    _shared_token = None
 
     def __init__(self):
         self.error = ErrorService()
@@ -31,7 +33,7 @@ class InterBankingService:
         self.client_id = os.getenv("MS_INTER_BANKING_CLIENT_ID")
         self.client_secret = os.getenv("MS_INTER_BANKING_CLIENT_SECRET")
         self.customer_id = os.getenv("MS_INTER_BANKING_CUSTOMER_ID")
-        self.token = os.getenv("MS_INTER_BANKING_AT")
+        self.token = type(self)._shared_token or os.getenv("MS_INTER_BANKING_AT")
         try:
             self.timeout_seconds = max(
                 1.0,
@@ -107,14 +109,20 @@ class InterBankingService:
 
     @staticmethod
     def _parse_json_response(response, service_name: str):
-        body_preview = response.text[:500] if response.content else "<empty>"
+        body_size = len(response.content or b"")
+        provider_request_id = (
+            response.headers.get("x-request-id")
+            or response.headers.get("x-correlation-id")
+            or "none"
+        )
 
         if response.status_code >= 400:
             logger.error(
-                "interbanking_response_error service=%s status_code=%s body=%s",
+                "interbanking_response_error service=%s status_code=%s body_size=%s provider_request_id=%s",
                 service_name,
                 response.status_code,
-                body_preview,
+                body_size,
+                provider_request_id,
             )
             raise HTTPException(
                 status_code=502,
@@ -139,10 +147,11 @@ class InterBankingService:
             result = response.json()
         except ValueError as exc:
             logger.error(
-                "interbanking_non_json_response service=%s status_code=%s body=%s",
+                "interbanking_non_json_response service=%s status_code=%s body_size=%s provider_request_id=%s",
                 service_name,
                 response.status_code,
-                body_preview,
+                body_size,
+                provider_request_id,
             )
             raise HTTPException(
                 status_code=502,
@@ -199,11 +208,18 @@ class InterBankingService:
 
 
     async def _update_token(self):
-        """
-        Obtains account balances
-        """
-        if not self.token or self._is_token_expired(self.token):
+        if not self._is_token_expired(self.token):
+            type(self)._shared_token = self.token
+            return
+
+        async with type(self)._token_lock:
+            shared_token = type(self)._shared_token
+            if not self._is_token_expired(shared_token):
+                self.token = shared_token
+                return
+
             self.token = await self._authenticate()
+            type(self)._shared_token = self.token
 
 
     async def _authenticate(self):
@@ -230,7 +246,6 @@ class InterBankingService:
                 detail="Interbanking authentication returned an invalid response.",
             )
 
-        os.environ["MS_INTER_BANKING_AT"] = bearer_token
         self.token = result
         return result
 

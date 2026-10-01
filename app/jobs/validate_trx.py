@@ -367,6 +367,7 @@ def find_trx_by_fingerprint(document_fingerprint, current_trx_id):
                     FROM trx
                     WHERE document_fingerprint = :document_fingerprint
                       AND trx_id != :current_trx_id
+                      AND status = 'conciliado'
                     LIMIT 1
                     """
                 ),
@@ -746,7 +747,9 @@ async def _run_reconciliation(entity_id=None) -> dict:
         )
 
     account_index, ambiguous_account_identifiers = build_account_index(accounts)
-    used_fingerprints = get_used_fingerprints(entity_id=entity_id)
+    # Fingerprints identify external bank movements, so occupancy must remain
+    # global even though pending receipts and accounts are entity-scoped.
+    used_fingerprints = get_used_fingerprints()
 
     updated_trx_count = 0
     repeated_trx_count = 0
