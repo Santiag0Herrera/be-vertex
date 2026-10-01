@@ -157,6 +157,9 @@ CREATE INDEX IF NOT EXISTS idx_fee_withdrawals_entity_id ON fee_withdrawals(enti
 CREATE INDEX IF NOT EXISTS idx_fee_withdrawals_currency_id ON fee_withdrawals(currency_id);
 CREATE INDEX IF NOT EXISTS idx_endpoints_perm_id ON endpoints(perm_id);
 CREATE INDEX IF NOT EXISTS idx_trx_document_fingerprint ON trx(document_fingerprint);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_trx_conciliated_document_fingerprint
+ON trx(document_fingerprint)
+WHERE status = 'conciliado' AND document_fingerprint IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_trx_entity_id ON trx(entity_id);
 CREATE INDEX IF NOT EXISTS idx_trx_client_id ON trx(client_id);
 CREATE INDEX IF NOT EXISTS idx_trx_account_id ON trx(account_id);

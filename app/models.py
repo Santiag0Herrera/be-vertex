@@ -1,6 +1,6 @@
 from datetime import datetime
 from zoneinfo import ZoneInfo
-from sqlalchemy import Column, Date, DateTime, Integer, String, Float, ForeignKey, Boolean, Numeric, CheckConstraint
+from sqlalchemy import Column, Date, DateTime, Integer, String, Float, ForeignKey, Boolean, Numeric, CheckConstraint, Index, text
 from sqlalchemy.orm import relationship
 
 from app.db.database import Base
@@ -88,6 +88,19 @@ class Product(Base):
 # Trx Model
 class Trx(Base):
     __tablename__ = "trx"
+    __table_args__ = (
+        Index(
+            "uq_trx_conciliated_document_fingerprint",
+            "document_fingerprint",
+            unique=True,
+            postgresql_where=text(
+                "status = 'conciliado' AND document_fingerprint IS NOT NULL"
+            ),
+            sqlite_where=text(
+                "status = 'conciliado' AND document_fingerprint IS NOT NULL"
+            ),
+        ),
+    )
 
     document_fingerprint = Column(String, nullable=True, index=True)
     document_name = Column(String, nullable=True)

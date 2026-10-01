@@ -1,15 +1,26 @@
+import asyncio
+import datetime
+import logging
+import os
+from typing import Optional
+
+import httpx
+import jwt
+from fastapi import HTTPException
+
+from app.bank_codes import codes
+
 from .ErrorService import ErrorService
 from .SuccessService import SuccessService
-from fastapi import HTTPException
-import httpx
-import os
-import datetime
-import jwt
-from app.bank_codes import codes
-from typing import Optional
+
+
+logger = logging.getLogger(__name__)
 
 
 class InterBankingService:
+    RETRYABLE_STATUS_CODES = {408, 429, 500, 502, 503, 504}
+    MOVEMENT_RESULT_LIMIT = 1000
+
     def __init__(self):
         self.error = ErrorService()
         self.success = SuccessService()
@@ -28,6 +39,20 @@ class InterBankingService:
             )
         except ValueError:
             self.timeout_seconds = 20.0
+        try:
+            self.retry_attempts = max(
+                0,
+                int(os.getenv("MS_INTER_BANKING_RETRY_ATTEMPTS", "2")),
+            )
+        except ValueError:
+            self.retry_attempts = 2
+        try:
+            self.retry_base_delay_seconds = max(
+                0.0,
+                float(os.getenv("MS_INTER_BANKING_RETRY_DELAY_SECONDS", "0.25")),
+            )
+        except ValueError:
+            self.retry_base_delay_seconds = 0.25
 
     async def _request(self, method: str, url: Optional[str], **kwargs):
         if not url:
@@ -35,9 +60,31 @@ class InterBankingService:
                 status_code=503,
                 detail="Interbanking is not configured.",
             )
+        normalized_method = method.upper()
+        max_attempts = 1 + (
+            self.retry_attempts if normalized_method in {"GET", "HEAD"} else 0
+        )
         try:
             async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
-                return await client.request(method, url, **kwargs)
+                for attempt in range(1, max_attempts + 1):
+                    response = await client.request(method, url, **kwargs)
+                    should_retry = (
+                        response.status_code in self.RETRYABLE_STATUS_CODES
+                        and attempt < max_attempts
+                    )
+                    if not should_retry:
+                        return response
+
+                    delay = self.retry_base_delay_seconds * (2 ** (attempt - 1))
+                    logger.warning(
+                        "interbanking_request_retry method=%s status_code=%s attempt=%s max_attempts=%s delay_seconds=%s",
+                        normalized_method,
+                        response.status_code,
+                        attempt,
+                        max_attempts,
+                        delay,
+                    )
+                    await asyncio.sleep(delay)
         except httpx.TimeoutException as exc:
             raise HTTPException(
                 status_code=504,
@@ -60,30 +107,76 @@ class InterBankingService:
 
     @staticmethod
     def _parse_json_response(response, service_name: str):
-        if not response.content:
+        body_preview = response.text[:500] if response.content else "<empty>"
+
+        if response.status_code >= 400:
+            logger.error(
+                "interbanking_response_error service=%s status_code=%s body=%s",
+                service_name,
+                response.status_code,
+                body_preview,
+            )
             raise HTTPException(
                 status_code=502,
-                detail=f"{service_name} returned an empty response. status_code={response.status_code}",
+                detail=(
+                    f"{service_name} request failed. "
+                    f"status_code={response.status_code}"
+                ),
+            )
+
+        if not response.content:
+            logger.error(
+                "interbanking_empty_response service=%s status_code=%s",
+                service_name,
+                response.status_code,
+            )
+            raise HTTPException(
+                status_code=502,
+                detail=f"{service_name} returned an empty successful response.",
             )
 
         try:
             result = response.json()
         except ValueError as exc:
+            logger.error(
+                "interbanking_non_json_response service=%s status_code=%s body=%s",
+                service_name,
+                response.status_code,
+                body_preview,
+            )
             raise HTTPException(
                 status_code=502,
-                detail=(
-                    f"{service_name} returned a non-JSON response. "
-                    f"status_code={response.status_code} body={response.text[:500]}"
-                ),
+                detail=f"{service_name} returned an invalid response.",
             ) from exc
 
-        if response.status_code >= 400:
+        if not isinstance(result, dict):
+            logger.error(
+                "interbanking_invalid_payload service=%s payload_type=%s",
+                service_name,
+                type(result).__name__,
+            )
             raise HTTPException(
                 status_code=502,
-                detail=f"{service_name} request failed. status_code={response.status_code} body={result}",
+                detail=f"{service_name} returned an invalid response structure.",
             )
 
         return result
+
+    @staticmethod
+    def _require_list(payload: dict, field: str, service_name: str) -> list:
+        value = payload.get(field)
+        if not isinstance(value, list):
+            logger.error(
+                "interbanking_missing_list service=%s field=%s payload_keys=%s",
+                service_name,
+                field,
+                sorted(payload.keys()),
+            )
+            raise HTTPException(
+                status_code=502,
+                detail=f"{service_name} returned an invalid response structure.",
+            )
+        return value
 
     @staticmethod
     def _get_bearer_token(token):
@@ -134,7 +227,7 @@ class InterBankingService:
         if not bearer_token:
             raise HTTPException(
                 status_code=502,
-                detail=f"Interbanking auth response did not include access_token or id_token. body={result}",
+                detail="Interbanking authentication returned an invalid response.",
             )
 
         os.environ["MS_INTER_BANKING_AT"] = bearer_token
@@ -154,7 +247,7 @@ class InterBankingService:
         params = {
             "bank-number": bank_number,
             "customer-id": self.customer_id,
-            "limit": 1000,
+            "limit": self.MOVEMENT_RESULT_LIMIT,
         }
         if date_since:
             params["date-since"] = date_since
@@ -168,6 +261,7 @@ class InterBankingService:
         response = await self._request("GET", url, headers=headers, params=params)
 
         result = self._parse_json_response(response, "Interbanking movements")
+        self._require_list(result, "movements_detail", "Interbanking movements")
         return result
 
 
@@ -203,9 +297,7 @@ class InterBankingService:
         Obtains all movements for all Interbanking client accounts.
         """
 
-        accounts_model = await self.get_accounts()
-
-        accounts = accounts_model.get("accounts", [])
+        accounts = await self.get_accounts_only()
 
         accounts_with_movements = []
 
@@ -240,22 +332,26 @@ class InterBankingService:
         return accounts_with_movements
 
 
-    async def get_accounts_balances(self):
+    async def _get_accounts_payload(self, url, service_name):
         await self._update_token()
-        url = self._build_url(
-            self.ib_balances_api_url,
-            f"?customer-id={self.customer_id}",
-        )
+        url = self._build_url(url, f"?customer-id={self.customer_id}")
         headers = {
             "Accept": "application/json",
             "Authorization": f"Bearer {self._get_bearer_token(self.token)}",
             "client_id": self.client_id,
         }
         response = await self._request("GET", url, headers=headers)
-        result = self._parse_json_response(response, "Interbanking balances")
-        accounts_list = result.get("accounts")
-        if accounts_list is None:
-            self.error.raise_not_found(accounts_list)
+        result = self._parse_json_response(response, service_name)
+        self._require_list(result, "accounts", service_name)
+        return result
+
+
+    async def get_accounts_balances(self):
+        result = await self._get_accounts_payload(
+            self.ib_balances_api_url,
+            "Interbanking balances",
+        )
+        accounts_list = result["accounts"]
 
         parsed_accounts = []
         for b in accounts_list:
@@ -265,7 +361,7 @@ class InterBankingService:
                 "bank_name": codes.get(b.get("bank_number"), b.get("bank_number")),
                 "account_type": b.get("account_type"),
                 "account_number": b.get("account_number"),
-                "balance": b.get("balances").get("countable_balance"),
+                "balance": (b.get("balances") or {}).get("countable_balance"),
                 "currency": b.get("currency"),
             }
             parsed_accounts.append(parsed_result)
@@ -273,24 +369,52 @@ class InterBankingService:
 
 
     async def get_accounts(self):
-        await self._update_token()
-        url = self._build_url(
+        return await self._get_accounts_payload(
             self.ib_accounts_api_url,
-            f"?customer-id={self.customer_id}",
+            "Interbanking accounts",
         )
-        headers = {
-            "Accept": "application/json",
-            "Authorization": f"Bearer {self._get_bearer_token(self.token)}",
-            "client_id": self.client_id,
-        }
-        response = await self._request("GET", url, headers=headers)
-        result = self._parse_json_response(response, "Interbanking accounts")
-        return result
+
+
+    async def get_reconciliation_accounts(self):
+        try:
+            result = await self.get_accounts()
+            source = "accounts"
+        except HTTPException as primary_error:
+            if primary_error.status_code not in {502, 503, 504}:
+                raise
+            logger.warning(
+                "interbanking_accounts_fallback primary_status=%s fallback=balances",
+                primary_error.status_code,
+            )
+            try:
+                result = await self._get_accounts_payload(
+                    self.ib_balances_api_url,
+                    "Interbanking balances",
+                )
+                source = "balances"
+            except HTTPException as fallback_error:
+                logger.error(
+                    "interbanking_accounts_unavailable primary_status=%s fallback_status=%s",
+                    primary_error.status_code,
+                    fallback_error.status_code,
+                )
+                raise HTTPException(
+                    status_code=502,
+                    detail="Interbanking account services are temporarily unavailable.",
+                ) from fallback_error
+
+        accounts = result["accounts"]
+        logger.info(
+            "interbanking_reconciliation_accounts source=%s count=%s",
+            source,
+            len(accounts),
+        )
+        return accounts
 
 
     async def get_accounts_only(self):
         accounts_model = await self.get_accounts()
-        accounts = accounts_model.get("accounts")
+        accounts = accounts_model["accounts"]
         if not accounts:
             self.error.raise_not_found(accounts)
         return accounts

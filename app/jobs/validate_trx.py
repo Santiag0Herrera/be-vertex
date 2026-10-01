@@ -5,10 +5,12 @@ import datetime
 import hashlib
 import logging
 from collections import Counter, defaultdict
+from contextlib import contextmanager
 from decimal import Decimal
 
 from dotenv import load_dotenv
 from dateutil.relativedelta import relativedelta
+from fastapi import HTTPException
 from sqlalchemy import bindparam, text
 
 from app.db.database import SessionLocal
@@ -24,6 +26,8 @@ logging.basicConfig(
 )
 
 logger = logging.getLogger("validate_trx_job")
+
+RECONCILIATION_ADVISORY_LOCK_ID = 0x564552544558
 
 SQL = """
 SELECT
@@ -70,6 +74,18 @@ def normalize_fingerprint_value(value):
     return str(value or "").strip().upper()
 
 
+def account_identifiers(account):
+    return {
+        normalized
+        for value in (
+            account.get("account_cbu"),
+            account.get("cbu"),
+            account.get("account_number"),
+        )
+        if (normalized := normalize_account(value))
+    }
+
+
 def get_bank_name_from_cbu(cbu: str) -> str:
     bank_code = cbu[:3]
     return codes.get(bank_code, "Banco desconocido")
@@ -84,6 +100,130 @@ def get_pending_trx(entity_id=None):
         logger.exception("[ERROR] failed_to_fetch_pending_transactions")
         raise
     finally:
+        db.close()
+
+
+def get_entity_account_identifiers(entity_id):
+    if entity_id is None:
+        return None
+
+    db = SessionLocal()
+    try:
+        rows = db.execute(
+            text(
+                """
+                SELECT cbus.nro
+                FROM cbus
+                INNER JOIN entities_cbus ON entities_cbus.cbu_id = cbus.id
+                WHERE entities_cbus.entity_id = :entity_id
+                """
+            ),
+            {"entity_id": entity_id},
+        ).all()
+        return {normalize_account(row[0]) for row in rows if row[0]}
+    finally:
+        db.close()
+
+
+def filter_reconciliation_accounts(accounts, owned_account_identifiers=None):
+    filtered_accounts = []
+    for account in accounts:
+        if not isinstance(account, dict):
+            continue
+        if not account.get("account_number") or not account.get("bank_number"):
+            logger.warning(
+                "[ACCOUNT SKIPPED] reason=missing_required_identifier keys=%s",
+                sorted(account.keys()),
+            )
+            continue
+        identifiers = account_identifiers(account)
+        if owned_account_identifiers is not None and not (
+            identifiers & owned_account_identifiers
+        ):
+            continue
+        filtered_accounts.append(account)
+    return filtered_accounts
+
+
+def build_account_index(accounts):
+    account_index = {}
+    ambiguous_identifiers = set()
+    for account in accounts:
+        identity = (
+            normalize_account(account.get("bank_number")),
+            normalize_account(account.get("account_number")),
+        )
+        for identifier in account_identifiers(account):
+            existing = account_index.get(identifier)
+            if existing is not None:
+                existing_identity = (
+                    normalize_account(existing.get("bank_number")),
+                    normalize_account(existing.get("account_number")),
+                )
+                if existing_identity != identity:
+                    ambiguous_identifiers.add(identifier)
+                    account_index.pop(identifier, None)
+                    continue
+            if identifier not in ambiguous_identifiers:
+                account_index[identifier] = account
+    return account_index, ambiguous_identifiers
+
+
+def get_used_fingerprints(entity_id=None):
+    db = SessionLocal()
+    try:
+        rows = db.execute(
+            text(
+                """
+                SELECT document_fingerprint, trx_id, status
+                FROM trx
+                WHERE document_fingerprint IS NOT NULL
+                  AND status = 'conciliado'
+                  AND (:entity_id IS NULL OR entity_id = :entity_id)
+                """
+            ),
+            {"entity_id": entity_id},
+        ).mappings()
+        return {
+            row["document_fingerprint"]: {
+                "trx_id": row["trx_id"],
+                "status": row["status"],
+            }
+            for row in rows
+        }
+    finally:
+        db.close()
+
+
+@contextmanager
+def reconciliation_lock():
+    """Serialize reconciliation across application workers when using PostgreSQL."""
+    db = SessionLocal()
+    is_postgresql = db.bind is not None and db.bind.dialect.name == "postgresql"
+    acquired = not is_postgresql
+    try:
+        if is_postgresql:
+            acquired = bool(
+                db.execute(
+                    text("SELECT pg_try_advisory_lock(:lock_id)"),
+                    {"lock_id": RECONCILIATION_ADVISORY_LOCK_ID},
+                ).scalar()
+            )
+        if not acquired:
+            raise HTTPException(
+                status_code=409,
+                detail="The reconciliation job is already running.",
+            )
+        yield
+    finally:
+        if acquired and is_postgresql:
+            try:
+                db.execute(
+                    text("SELECT pg_advisory_unlock(:lock_id)"),
+                    {"lock_id": RECONCILIATION_ADVISORY_LOCK_ID},
+                )
+            except Exception:
+                logger.exception("[ERROR] failed_to_release_reconciliation_lock")
         db.close()
 
 
@@ -182,6 +322,40 @@ def build_fingerprint_slot(base_fingerprint, slot_number):
     return f"{base_fingerprint}:{slot_number}"
 
 
+def build_credit_movement_index(movements):
+    movement_index = defaultdict(list)
+    for movement in movements:
+        try:
+            movement_type = movement.get("debit_credit_type")
+            if movement_type != "C":
+                continue
+            key = (
+                abs(normalize_amount(movement.get("amount"))),
+                datetime.datetime.fromisoformat(
+                    str(movement.get("movement_date")).replace("Z", "+00:00")
+                ).date(),
+            )
+            movement_index[key].append(movement)
+        except (AttributeError, TypeError, ValueError, ArithmeticError):
+            logger.warning(
+                "[IB MOVEMENT SKIPPED] reason=invalid_structure keys=%s",
+                sorted(movement.keys()) if isinstance(movement, dict) else [],
+            )
+    return movement_index
+
+
+def select_credit_movements(movement_index, amount, valid_dates):
+    normalized_amount = abs(normalize_amount(amount))
+    return [
+        movement
+        for movement_date in sorted(valid_dates)
+        for movement in movement_index.get(
+            (normalized_amount, movement_date),
+            [],
+        )
+    ]
+
+
 def find_trx_by_fingerprint(document_fingerprint, current_trx_id):
     db = SessionLocal()
     try:
@@ -220,6 +394,7 @@ def match_trx_with_ib(
     bank_number,
     account_number,
     valid_movement_dates=None,
+    used_fingerprints=None,
 ):
     trx_amount = normalize_amount(trx["trx_amount"])
     trx_date = trx["trx_date"].date()
@@ -239,7 +414,7 @@ def match_trx_with_ib(
         type_matches = mov_type == "C"
 
         if amount_matches or date_matches:
-            logger.info(
+            logger.debug(
                 "[IB CANDIDATE] trx_amount=%s mov_amount=%s amount_match=%s valid_dates=%s mov_date=%s date_match=%s type=%s",
                 trx_amount,
                 mov_amount,
@@ -293,10 +468,13 @@ def match_trx_with_ib(
             base_fingerprint,
             slot_number,
         )
-        duplicated_trx = find_trx_by_fingerprint(
-            document_fingerprint=document_fingerprint,
-            current_trx_id=trx["trx_id"],
-        )
+        if used_fingerprints is None:
+            duplicated_trx = find_trx_by_fingerprint(
+                document_fingerprint=document_fingerprint,
+                current_trx_id=trx["trx_id"],
+            )
+        else:
+            duplicated_trx = used_fingerprints.get(document_fingerprint)
         matched_result = {
             "movement": mov,
             "document_fingerprint": document_fingerprint,
@@ -466,7 +644,35 @@ def calculate_fee_amount(amount, fee_percentage):
     return (amount * fee_percentage / Decimal("100")).quantize(Decimal("0.01"))
 
 
-async def run(entity_id=None) -> dict:
+def build_job_result(
+    started_at,
+    total_pending,
+    checked=0,
+    conciliated=0,
+    repeated=0,
+    expired=0,
+    skipped=0,
+    movement_requests=0,
+    movement_cache_hits=0,
+):
+    duration = (datetime.datetime.now() - started_at).total_seconds()
+    return {
+        "checked": checked,
+        "conciliated": conciliated,
+        "repeated": repeated,
+        "expired": expired,
+        "skipped": skipped,
+        "still_pending": max(
+            0,
+            total_pending - conciliated - repeated - expired,
+        ),
+        "movement_requests": movement_requests,
+        "movement_cache_hits": movement_cache_hits,
+        "duration_seconds": round(duration, 2),
+    }
+
+
+async def _run_reconciliation(entity_id=None) -> dict:
     started_at = datetime.datetime.now()
     current_time = started_at.strftime("%Y-%m-%d %H:%M:%S")
 
@@ -475,259 +681,317 @@ async def run(entity_id=None) -> dict:
     logger.info("VALIDATE TRX JOB | %s", current_time)
     logger.info("======================================================================")
 
-    ib_service = InterBankingService()
-    business_calendar = BusinessCalendarService()
-
-    try:
-        accounts_model = await ib_service.get_accounts()
-    except Exception:
-        logger.exception("[ERROR] failed_to_fetch_interbanking_accounts")
-        raise
-
-    accounts = accounts_model.get("accounts", [])
-
     pending_transactions = get_pending_trx(entity_id=entity_id)
+    total_pending = len(pending_transactions)
 
     logger.info(
-        "[JOB INFO] ib_accounts=%s pending_transactions=%s",
-        len(accounts),
-        len(pending_transactions),
+        "[JOB INFO] entity_id=%s pending_transactions=%s",
+        entity_id,
+        total_pending,
     )
 
     if not pending_transactions:
         logger.info("[JOB END] no_pending_transactions_found")
-        return {
-            "checked": 0,
-            "conciliated": 0,
-            "repeated": 0,
-            "expired": 0,
-            "skipped": 0,
-            "still_pending": 0,
-            "duration_seconds": 0,
-        }
+        return build_job_result(started_at, total_pending=0)
+
+    expiration_cutoff = get_expiration_cutoff(started_at)
+    expired_trx_ids = {
+        trx["trx_id"]
+        for trx in pending_transactions
+        if trx["trx_date"] <= expiration_cutoff
+    }
+    expired_trx_count = expire_old_pending_trx(
+        expired_trx_ids,
+        reference_time=started_at,
+    )
+    pending_transactions = [
+        trx
+        for trx in pending_transactions
+        if trx["trx_id"] not in expired_trx_ids
+    ]
+
+    logger.info(
+        "[EXPIRATION] expired=%s active_pending=%s external_requests_avoided=%s",
+        expired_trx_count,
+        len(pending_transactions),
+        len(expired_trx_ids),
+    )
+
+    if not pending_transactions:
+        logger.info("[JOB END] all_pending_transactions_expired")
+        return build_job_result(
+            started_at,
+            total_pending=total_pending,
+            expired=expired_trx_count,
+        )
+
+    ib_service = InterBankingService()
+    business_calendar = BusinessCalendarService()
+
+    try:
+        accounts = await ib_service.get_reconciliation_accounts()
+    except Exception:
+        logger.exception("[ERROR] failed_to_fetch_interbanking_accounts")
+        raise
+
+    owned_account_identifiers = get_entity_account_identifiers(entity_id)
+    accounts = filter_reconciliation_accounts(
+        accounts,
+        owned_account_identifiers=owned_account_identifiers,
+    )
+    if not accounts:
+        raise HTTPException(
+            status_code=422,
+            detail="No Interbanking account is configured for this entity.",
+        )
+
+    account_index, ambiguous_account_identifiers = build_account_index(accounts)
+    used_fingerprints = get_used_fingerprints(entity_id=entity_id)
 
     updated_trx_count = 0
     repeated_trx_count = 0
     checked_trx_count = 0
     skipped_trx_count = 0
-    failed_validation_trx_ids = set()
+    reconciliation_groups = defaultdict(list)
+    settlement_dates = {}
 
-    for acc in accounts:
-        account_number = acc.get("account_number")
-        account_cbu = acc.get("account_cbu")
-        bank_number = acc.get("bank_number")
-        bank_name = acc.get("bank_name")
-
-        normalized_account_number = normalize_account(account_number)
-        normalized_account_cbu = normalize_account(account_cbu)
-
-        account_pending_trx = [
-            trx
-            for trx in pending_transactions
-            if normalize_account(trx.get("trx_receptor_cbu"))
-            in [normalized_account_cbu, normalized_account_number]
-        ]
-
-        logger.info(
-            "[ACCOUNT] bank=%s account_number=%s cbu=%s pending_transactions=%s",
-            bank_name,
-            account_number,
-            account_cbu,
-            len(account_pending_trx),
-        )
-
-        if not account_pending_trx:
+    for trx in pending_transactions:
+        trx_id = trx["trx_id"]
+        receptor = normalize_account(trx.get("trx_receptor_cbu"))
+        if receptor in ambiguous_account_identifiers:
+            skipped_trx_count += 1
+            logger.error(
+                "[TRX SKIPPED] trx_id=%s reason=ambiguous_destination_account",
+                trx_id,
+            )
             continue
 
-        for trx in account_pending_trx:
-            checked_trx_count += 1
-
-            trx_id = trx.get("trx_id")
-            trx_date = trx.get("trx_date").date()
-            trx_amount = trx.get("trx_amount")
-            trx_currency = trx.get("currency_name")
-            trx_receptor_cbu = trx.get("trx_receptor_cbu")
-            customer_balance_id = trx.get("customer_balance_id")
-
-            logger.info(
-                "[TRX] checking trx_id=%s amount=%s currency=%s date=%s receptor=%s account_number=%s account_cbu=%s",
+        account = account_index.get(receptor)
+        if account is None:
+            skipped_trx_count += 1
+            logger.warning(
+                "[TRX SKIPPED] trx_id=%s reason=destination_account_not_available",
                 trx_id,
-                trx_amount,
-                trx_currency,
-                trx_date,
-                trx_receptor_cbu,
-                account_number,
-                account_cbu,
             )
+            continue
+
+        trx_date = trx["trx_date"].date()
+        try:
+            if trx_date not in settlement_dates:
+                settlement_dates[trx_date] = (
+                    await business_calendar.get_settlement_date(trx_date)
+                )
+            settlement_date = settlement_dates[trx_date]
+        except Exception:
+            skipped_trx_count += 1
+            logger.exception(
+                "[TRX SKIPPED] trx_id=%s reason=settlement_date_failed",
+                trx_id,
+            )
+            continue
+
+        date_since = trx_date.isoformat()
+        date_until = (settlement_date + datetime.timedelta(days=1)).isoformat()
+        group_key = (
+            normalize_account(account.get("bank_number")),
+            normalize_account(account.get("account_number")),
+            date_since,
+            date_until,
+        )
+        reconciliation_groups[group_key].append(
+            {
+                "trx": trx,
+                "account": account,
+                "valid_movement_dates": {trx_date, settlement_date},
+            }
+        )
+
+    movement_requests = 0
+    movement_cache_hits = sum(
+        max(0, len(entries) - 1)
+        for entries in reconciliation_groups.values()
+    )
+
+    logger.info(
+        "[BATCHING] groups=%s pending_grouped=%s movement_requests_avoided=%s",
+        len(reconciliation_groups),
+        sum(len(entries) for entries in reconciliation_groups.values()),
+        movement_cache_hits,
+    )
+
+    for group_key, entries in reconciliation_groups.items():
+        bank_number, account_number, date_since, date_until = group_key
+        checked_trx_count += len(entries)
+        movement_requests += 1
+
+        try:
+            ib_movements_result = await ib_service.get_movement(
+                account_number=account_number,
+                bank_number=bank_number,
+                date_since=date_since,
+                date_until=date_until,
+            )
+            movements = ib_movements_result["movements_detail"]
+            if len(movements) >= ib_service.MOVEMENT_RESULT_LIMIT:
+                raise RuntimeError(
+                    "Interbanking movement result reached its safety limit; "
+                    "the batch will remain pending to avoid reconciling truncated data"
+                )
+            movement_index = build_credit_movement_index(movements)
+        except Exception:
+            skipped_trx_count += len(entries)
+            logger.exception(
+                "[BATCH FAILED] account_number=%s bank_number=%s range_start=%s range_end=%s affected_transactions=%s",
+                account_number,
+                bank_number,
+                date_since,
+                date_until,
+                len(entries),
+            )
+            continue
+
+        logger.info(
+            "[IB FETCH] account_number=%s bank_number=%s movements=%s range_start=%s range_end=%s reused_by=%s",
+            account_number,
+            bank_number,
+            len(movements),
+            date_since,
+            date_until,
+            len(entries),
+        )
+
+        for entry in entries:
+            trx = entry["trx"]
+            trx_id = trx["trx_id"]
+            trx_date = trx["trx_date"].date()
+            trx_amount = trx["trx_amount"]
 
             try:
-                settlement_date = await business_calendar.get_settlement_date(trx_date)
-                valid_movement_dates = {trx_date, settlement_date}
-                trx_date_since = trx_date.isoformat()
-                trx_date_until = (
-                    settlement_date + datetime.timedelta(days=1)
-                ).isoformat()
-
-                # buscar movimientos en interbanking con ese rango de fecha, monto y tipo de movimiento (credito/debito)
-                ib_movements_result = await ib_service.get_movement(
-                    account_number=account_number,
-                    bank_number=bank_number,
-                    date_since=trx_date_since,
-                    date_until=trx_date_until,
+                candidate_movements = select_credit_movements(
+                    movement_index,
+                    trx_amount,
+                    entry["valid_movement_dates"],
                 )
-
-                movements = ib_movements_result.get("movements_detail", [])
-
-                logger.info(
-                    "[IB FETCH] trx_id=%s movements=%s range_start=%s range_end=%s valid_dates=%s",
-                    trx_id,
-                    len(movements),
-                    trx_date_since,
-                    trx_date_until,
-                    sorted(valid_movement_dates),
-                )
-
                 matched_result = match_trx_with_ib(
                     trx,
-                    movements,
+                    candidate_movements,
                     bank_number=bank_number,
                     account_number=account_number,
-                    valid_movement_dates=valid_movement_dates,
+                    valid_movement_dates=entry["valid_movement_dates"],
+                    used_fingerprints=used_fingerprints,
                 )
 
-                if matched_result:
-                    matched_movement = matched_result["movement"]
-                    document_fingerprint = matched_result["document_fingerprint"]
-                    duplicated_trx = matched_result["duplicated_trx"]
-                    fingerprint_slot = matched_result["fingerprint_slot"]
-                    fingerprint_total_slots = matched_result[
-                        "fingerprint_total_slots"
-                    ]
-
-                    logger.info(
-                        "[MATCH] trx_id=%s trx_amount=%s ib_amount=%s trx_date=%s ib_date=%s fingerprint=%s slot=%s/%s",
-                        trx_id,
-                        trx_amount,
-                        matched_movement.get("amount"),
-                        trx_date,
-                        matched_movement.get("movement_date"),
-                        document_fingerprint,
-                        fingerprint_slot,
-                        fingerprint_total_slots,
-                    )
-
-                    if duplicated_trx:
-                        updated = mark_trx_as_repeated(
-                            trx_id=trx_id,
-                            document_fingerprint=document_fingerprint,
-                        )
-
-                        if updated:
-                            repeated_trx_count += 1
-                            logger.warning(
-                                "[TRX UPDATED] trx_id=%s status=repetida duplicate_of=%s duplicate_status=%s capacity_exhausted=%s/%s",
-                                trx_id,
-                                duplicated_trx.get("trx_id"),
-                                duplicated_trx.get("status"),
-                                fingerprint_total_slots,
-                                fingerprint_total_slots,
-                            )
-                        else:
-                            skipped_trx_count += 1
-                            logger.warning(
-                                "[WARNING] repeated_update_skipped trx_id=%s",
-                                trx_id,
-                            )
-                        continue
-
-                    fee_percentage = trx.get("fee_percentage")
-
-                    updated = update_trx_status(
-                        trx_id=trx_id,
-                        new_status="conciliado",
-                        customer_balance_id=customer_balance_id,
-                        trx_amount=trx_amount,
-                        fee_percentage=fee_percentage,
-                        document_fingerprint=document_fingerprint,
-                    )
-
-
-                    if updated:
-                        updated_trx_count += 1
-                        logger.info(
-                            "[TRX UPDATED] trx_id=%s status=conciliado",
-                            trx_id,
-                        )
-                        logger.info(
-                            "[FEE APPLIED] trx_id=%s fee_percentage=%s fee_amount=%s",
-                            trx_id,
-                            fee_percentage or 0,
-                            calculate_fee_amount(trx_amount, fee_percentage),
-                        )
-                    else:
-                        skipped_trx_count += 1
-                        logger.warning(
-                            "[WARNING] trx_update_skipped trx_id=%s",
-                            trx_id,
-                        )
-
-                else:
+                if not matched_result:
                     logger.info(
                         "[NO MATCH] trx_id=%s amount=%s date=%s",
                         trx_id,
                         trx_amount,
                         trx_date,
                     )
+                    continue
+
+                matched_movement = matched_result["movement"]
+                document_fingerprint = matched_result["document_fingerprint"]
+                duplicated_trx = matched_result["duplicated_trx"]
+                fingerprint_slot = matched_result["fingerprint_slot"]
+                fingerprint_total_slots = matched_result[
+                    "fingerprint_total_slots"
+                ]
+
+                logger.info(
+                    "[MATCH] trx_id=%s trx_amount=%s ib_amount=%s trx_date=%s ib_date=%s fingerprint=%s slot=%s/%s",
+                    trx_id,
+                    trx_amount,
+                    matched_movement.get("amount"),
+                    trx_date,
+                    matched_movement.get("movement_date"),
+                    document_fingerprint,
+                    fingerprint_slot,
+                    fingerprint_total_slots,
+                )
+
+                if duplicated_trx:
+                    updated = mark_trx_as_repeated(
+                        trx_id=trx_id,
+                        document_fingerprint=document_fingerprint,
+                    )
+                    if updated:
+                        repeated_trx_count += 1
+                        logger.warning(
+                            "[TRX UPDATED] trx_id=%s status=repetida duplicate_of=%s duplicate_status=%s capacity_exhausted=%s/%s",
+                            trx_id,
+                            duplicated_trx.get("trx_id"),
+                            duplicated_trx.get("status"),
+                            fingerprint_total_slots,
+                            fingerprint_total_slots,
+                        )
+                    else:
+                        skipped_trx_count += 1
+                    continue
+
+                fee_percentage = trx.get("fee_percentage")
+                updated = update_trx_status(
+                    trx_id=trx_id,
+                    new_status="conciliado",
+                    customer_balance_id=trx.get("customer_balance_id"),
+                    trx_amount=trx_amount,
+                    fee_percentage=fee_percentage,
+                    document_fingerprint=document_fingerprint,
+                )
+
+                if updated:
+                    updated_trx_count += 1
+                    used_fingerprints[document_fingerprint] = {
+                        "trx_id": trx_id,
+                        "status": "conciliado",
+                    }
+                    logger.info(
+                        "[TRX UPDATED] trx_id=%s status=conciliado fee_percentage=%s fee_amount=%s",
+                        trx_id,
+                        fee_percentage or 0,
+                        calculate_fee_amount(trx_amount, fee_percentage),
+                    )
+                else:
+                    skipped_trx_count += 1
 
             except Exception:
                 skipped_trx_count += 1
-                failed_validation_trx_ids.add(trx_id)
                 logger.exception(
                     "[ERROR] trx_validation_failed trx_id=%s account_number=%s",
                     trx_id,
                     account_number,
                 )
 
-    eligible_for_expiration = {
-        trx.get("trx_id")
-        for trx in pending_transactions
-        if trx.get("trx_id") not in failed_validation_trx_ids
-    }
-    expired_trx_count = expire_old_pending_trx(
-        eligible_for_expiration,
-        reference_time=started_at,
-    )
-
-    finished_at = datetime.datetime.now()
-    duration = (finished_at - started_at).total_seconds()
-    still_pending_count = max(
-        0,
-        len(pending_transactions)
-        - updated_trx_count
-        - repeated_trx_count
-        - expired_trx_count,
+    result = build_job_result(
+        started_at,
+        total_pending=total_pending,
+        checked=checked_trx_count,
+        conciliated=updated_trx_count,
+        repeated=repeated_trx_count,
+        expired=expired_trx_count,
+        skipped=skipped_trx_count,
+        movement_requests=movement_requests,
+        movement_cache_hits=movement_cache_hits,
     )
 
     logger.info(
-        "[JOB END] validate_trx checked=%s conciliated=%s repeated=%s expired=%s skipped=%s still_pending=%s duration_seconds=%.2f",
-        checked_trx_count,
-        updated_trx_count,
-        repeated_trx_count,
-        expired_trx_count,
-        skipped_trx_count,
-        still_pending_count,
-        duration,
+        "[JOB END] validate_trx checked=%s conciliated=%s repeated=%s expired=%s skipped=%s still_pending=%s movement_requests=%s movement_cache_hits=%s duration_seconds=%.2f",
+        result["checked"],
+        result["conciliated"],
+        result["repeated"],
+        result["expired"],
+        result["skipped"],
+        result["still_pending"],
+        result["movement_requests"],
+        result["movement_cache_hits"],
+        result["duration_seconds"],
     )
+    return result
 
-    return {
-        "checked": checked_trx_count,
-        "conciliated": updated_trx_count,
-        "repeated": repeated_trx_count,
-        "expired": expired_trx_count,
-        "skipped": skipped_trx_count,
-        "still_pending": still_pending_count,
-        "duration_seconds": round(duration, 2),
-    }
+
+async def run(entity_id=None) -> dict:
+    with reconciliation_lock():
+        return await _run_reconciliation(entity_id=entity_id)
 
 
 if __name__ == "__main__":
