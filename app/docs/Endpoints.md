@@ -71,7 +71,7 @@ No hay endpoint de alta, modificación ni baja de entidades. Esa administración
 - `GET /currency/all`
 - `GET /logs/all` — admin/super y limitado a actores de su entidad.
 - `GET /dashboard/summary`
-- `POST /extractor/aws-extract`
-- `POST /extractorV2/aws-extract`
+- `POST /extractorV2/extract` (Gemini)
+- `POST /extractorV2/aws-extract` (alias temporal compatible; también usa Gemini)
 
 Swagger en desarrollo es la fuente exacta de parámetros y esquemas: `/docs`.

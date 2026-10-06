@@ -3,31 +3,18 @@ from __future__ import annotations
 import logging
 from time import perf_counter
 
-from botocore.exceptions import (
-    BotoCoreError,
-    ClientError,
-    ConnectTimeoutError,
-    EndpointConnectionError,
-    ReadTimeoutError,
-)
 from fastapi import HTTPException, UploadFile
 
-from app.services.extractor.aws_client import (
-    TRANSIENT_TEXTRACT_ERROR_CODES,
-    analyze_document_bytes,
-    get_client_error_code,
-)
 from app.services.extractor.builder import build_document_response
-from app.services.extractor.extractors import (
-    extract_fields_from_wallet_lines,
-    extract_kv_pairs_from_forms,
-    extract_pairs_from_lines,
-    merge_and_dedup_fields,
+from app.services.extractor.gemini_client import (
+    GeminiExtractionError,
+    extract_document_fields,
 )
-from app.services.extractor.gemini_fallback import recover_missing_fields
-from app.services.extractor.heuristics import extract_datetime_from_filename
 from app.services.extractor.models import DocumentExtractResponse, ExtractedField
-from app.services.extractor.pdf_converter import convert_first_pdf_page_to_png
+from app.services.ReceiptIdentityService import (
+    build_receipt_fingerprint,
+    file_sha256,
+)
 
 
 ALLOWED_CONTENT_TYPES = {
@@ -37,7 +24,18 @@ ALLOWED_CONTENT_TYPES = {
     "image/tiff",
 }
 
-MAX_SYNC_TEXTRACT_FILE_SIZE = 10 * 1024 * 1024
+MAX_DOCUMENT_FILE_SIZE = 10 * 1024 * 1024
+GEMINI_FIELD_KEYS = {
+    "amount": "importe",
+    "trx_id": "numero de transaccion",
+    "emisor_name": "nombre originante",
+    "emisor_cuit": "cuit originante",
+    "emisor_cbu": "cbu origen",
+    "receptor_name": "nombre destinatario",
+    "receptor_cuit": "cuit destinatario",
+    "receptor_cbu": "cbu destino",
+    "date": "fecha",
+}
 logger = logging.getLogger(__name__)
 
 
@@ -60,44 +58,21 @@ async def extract_document_from_file(
 
         original_data = await file.read()
         validate_file_data(original_data)
+        content_sha256 = file_sha256(original_data)
 
-        textract_data = original_data
-        if file.content_type == "application/pdf":
-            textract_data = convert_pdf_or_raise(original_data)
-
-        aws_response = await call_textract_or_raise(textract_data, request_id=request_id)
-
-        fields = merge_and_dedup_fields(
-            extract_kv_pairs_from_forms(aws_response),
-            extract_pairs_from_lines(aws_response),
-            extract_fields_from_wallet_lines(aws_response),
-        )
-
-        filename_datetime = extract_datetime_from_filename(file.filename)
-        if filename_datetime:
-            fields.append(
-                ExtractedField(
-                    key="fecha archivo",
-                    value=filename_datetime,
-                    confidence=999.0,
-                )
-            )
-
-        textract_result = build_document_response(fields)
-        if textract_result.ok:
-            return attach_document_name(textract_result, filename)
-
-        gemini_fields = await recover_missing_fields(
-            original_data=original_data,
+        gemini_result = await call_gemini_or_raise(
+            original_data,
             content_type=file.content_type,
-            textract_result=textract_result,
             request_id=request_id,
         )
-        if not gemini_fields:
-            return attach_document_name(textract_result, filename)
-
-        result = build_document_response(merge_and_dedup_fields(fields, gemini_fields))
-        return attach_document_name(result, filename)
+        fields = gemini_fields(gemini_result.model_dump())
+        result = attach_document_identity(
+            build_document_response(fields),
+            filename,
+            content_sha256,
+        )
+        outcome = "success" if result.ok else "incomplete"
+        return result
     except HTTPException as exc:
         outcome = f"http_{exc.status_code}"
         raise
@@ -130,14 +105,20 @@ def validate_file_metadata(file: UploadFile) -> None:
         )
 
 
-def attach_document_name(
+def attach_document_identity(
     result: DocumentExtractResponse,
     filename: str | None,
+    content_sha256: str,
 ) -> DocumentExtractResponse:
     document_name = filename or "unnamed"
     result.partial["document_name"] = document_name
+    result.partial["file_sha256"] = content_sha256
     if result.document:
         result.document.document_name = document_name
+        result.document.file_sha256 = content_sha256
+        receipt_fingerprint = build_receipt_fingerprint(result.document)
+        result.document.receipt_fingerprint = receipt_fingerprint
+        result.partial["receipt_fingerprint"] = receipt_fingerprint
     return result
 
 
@@ -145,48 +126,75 @@ def validate_file_data(data: bytes) -> None:
     if not data:
         raise HTTPException(status_code=400, detail="Empty file")
 
-    if len(data) > MAX_SYNC_TEXTRACT_FILE_SIZE:
+    if len(data) > MAX_DOCUMENT_FILE_SIZE:
         raise HTTPException(
             status_code=413,
-            detail="File too large for synchronous Textract (max 10MB)",
+            detail="File too large for Gemini extraction (max 10MB)",
         )
 
 
-def convert_pdf_or_raise(data: bytes) -> bytes:
-    try:
-        return convert_first_pdf_page_to_png(data)
-    except Exception as exc:
-        raise HTTPException(status_code=422, detail=f"PDF conversion failed: {str(exc)}") from exc
+def gemini_fields(payload: dict) -> list[ExtractedField]:
+    return [
+        ExtractedField(
+            key=GEMINI_FIELD_KEYS[field_name],
+            value=str(value),
+            confidence=None,
+        )
+        for field_name, value in payload.items()
+        if field_name in GEMINI_FIELD_KEYS and value not in (None, "")
+    ]
 
 
-async def call_textract_or_raise(data: bytes, request_id: str = "unknown"):
+async def call_gemini_or_raise(
+    data: bytes,
+    *,
+    content_type: str,
+    request_id: str = "unknown",
+):
     try:
-        return await analyze_document_bytes(data, request_id=request_id)
-    except ClientError as exc:
-        error_code = get_client_error_code(exc)
+        return await extract_document_fields(
+            data=data,
+            content_type=content_type,
+            required_fields={
+                "amount",
+                "trx_id",
+                "emisor_cuit",
+                "receptor_cuit",
+                "date",
+            },
+            request_id=request_id,
+        )
+    except GeminiExtractionError as exc:
         logger.error(
-            "Textract client error request_id=%s error_code=%s",
+            "Gemini extraction failed request_id=%s reason=%s status_code=%s "
+            "retry_after=%s model=%s",
             request_id,
-            error_code,
+            exc.reason,
+            exc.status_code or "none",
+            exc.retry_after or "none",
+            exc.model or "unknown",
         )
-        if error_code in TRANSIENT_TEXTRACT_ERROR_CODES:
+        if exc.reason == "not_configured":
+            raise HTTPException(
+                status_code=503,
+                detail="Gemini is not configured.",
+            ) from exc
+        if exc.reason == "payment_required":
+            raise HTTPException(
+                status_code=402,
+                detail="Gemini billing is not enabled for the configured project.",
+            ) from exc
+        if exc.reason in {"quota_exceeded", "rate_limited"}:
             raise HTTPException(
                 status_code=429,
-                detail="Textract is temporarily busy. Please retry this file.",
+                detail="Gemini quota is temporarily unavailable. Please retry this file.",
+            ) from exc
+        if exc.reason == "timeout":
+            raise HTTPException(
+                status_code=504,
+                detail="Gemini did not respond in time. Please retry this file.",
             ) from exc
         raise HTTPException(
             status_code=502,
-            detail=f"Textract rejected the document ({error_code}).",
-        ) from exc
-    except (ConnectTimeoutError, ReadTimeoutError, EndpointConnectionError) as exc:
-        logger.error("Textract timeout request_id=%s error=%s", request_id, exc)
-        raise HTTPException(
-            status_code=504,
-            detail="Textract did not respond in time. Please retry this file.",
-        ) from exc
-    except BotoCoreError as exc:
-        logger.error("Textract SDK error request_id=%s error=%s", request_id, exc)
-        raise HTTPException(
-            status_code=502,
-            detail="Unable to process the document with Textract.",
+            detail=f"Gemini could not process the document ({exc.reason}).",
         ) from exc

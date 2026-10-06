@@ -30,6 +30,15 @@ def test_quota_error_is_reduced_to_stable_reason():
     assert get_retry_after(response) == "48.04s"
 
 
+def test_payment_required_is_reduced_to_stable_reason():
+    response = make_response(
+        402,
+        {"error": {"message": "Payment required", "details": []}},
+    )
+
+    assert classify_google_error(response) == "payment_required"
+
+
 def test_retry_after_header_has_priority():
     response = make_response(
         429,

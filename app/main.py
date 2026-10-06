@@ -25,8 +25,7 @@ from app.router import (
     payment_orders,
     balance,
     currency,
-    extractor,
-    textract,
+    gemini_extractor,
     logs,
     dashboard,
 )
@@ -60,7 +59,6 @@ app.include_router(payments.router)
 app.include_router(payment_orders.router)
 app.include_router(balance.router)
 app.include_router(currency.router)
-app.include_router(extractor.router)
-app.include_router(textract.router)
+app.include_router(gemini_extractor.router)
 app.include_router(logs.router)
 app.include_router(dashboard.router)

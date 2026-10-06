@@ -6,7 +6,6 @@ from pydantic import ValidationError
 
 from app.schemas.transactions import DocumentRequest
 from app.services.extractor.aliases import KEY_ALIASES
-from app.services.extractor.heuristics import is_wallet_document
 from app.services.extractor.models import DocumentExtractResponse, ExtractedField, ParseIssue
 from app.services.extractor.normalizer import clean_value, normalize_key
 from app.services.extractor.parsers import extract_cbu, extract_digits, parse_amount, parse_date, parse_time
@@ -16,9 +15,7 @@ from app.services.extractor.scoring import extract_semantic_candidates
 REQUIRED_FOR_DOCUMENT = {
     "amount",
     "trx_id",
-    "emisor_name",
     "emisor_cuit",
-    "receptor_name",
     "receptor_cuit",
     "date",
 }
@@ -26,8 +23,6 @@ REQUIRED_FOR_DOCUMENT = {
 
 def build_document_response(fields: List[ExtractedField]) -> DocumentExtractResponse:
     normalized = extract_semantic_candidates(fields)
-    wallet = is_wallet_document(fields)
-
     for field in fields:
         key = normalize_key(field.key)
         alias = KEY_ALIASES.get(key)
@@ -48,12 +43,7 @@ def build_document_response(fields: List[ExtractedField]) -> DocumentExtractResp
     assign_cbu_field(normalized, partial, "receptor_cbu")
     assign_wallet_fields(normalized, partial)
     assign_date(normalized, partial, missing, errors)
-
-    if wallet:
-        missing = [
-            field for field in missing
-            if field not in {"emisor_name", "receptor_name", "receptor_cuit"}
-        ]
+    missing = [field for field in missing if field in REQUIRED_FOR_DOCUMENT]
 
     if not REQUIRED_FOR_DOCUMENT.issubset(partial.keys()):
         return DocumentExtractResponse(

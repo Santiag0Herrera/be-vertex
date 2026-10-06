@@ -72,11 +72,17 @@ def test_create_multiple_stores_document_name_and_owner_account_number():
         transactions=[
             DocumentRequest(
                 amount=100,
+                trx_id="MULTIPLE-001",
+                emisor_cuit="20123456789",
+                receptor_cuit="30999999991",
                 date=date(2026, 8, 27),
                 received_date=date(2026, 8, 26),
             ),
             DocumentRequest(
                 amount=200,
+                trx_id="MULTIPLE-002",
+                emisor_cuit="20987654321",
+                receptor_cuit="30999999991",
                 date=date(2026, 8, 27),
                 received_date=date(2026, 8, 26),
             ),
@@ -98,6 +104,14 @@ def test_create_multiple_stores_document_name_and_owner_account_number():
     assert {trx.received_date for trx in db.query(Trx).all()} == {
         date(2026, 8, 26)
     }
+    assert {trx.source_trx_id for trx in db.query(Trx).all()} == {
+        "MULTIPLE-001",
+        "MULTIPLE-002",
+    }
+    assert {trx.receptor_cuit for trx in db.query(Trx).all()} == {
+        "30999999991"
+    }
+    assert all(trx.receipt_fingerprint for trx in db.query(Trx).all())
     db.close()
 
 
@@ -169,6 +183,7 @@ def test_create_individual_stores_document_name():
 
     transaction = db.query(Trx).one()
     assert transaction.document_name == "comprobante-individual.pdf"
+    assert transaction.receptor_cuit == cbu.cuit
     assert transaction.client_id == client.id
     assert transaction.received_date == date(2026, 8, 26)
     db.close()
@@ -217,6 +232,7 @@ def test_get_all_filters_by_partial_document_name():
                 document_name=document_name,
                 emisor_name="Emisor",
                 emisor_cuit="20123456789",
+                receptor_cuit="30999999991",
                 receptor_cbu="0" * 22,
                 entity_id=entity.id,
                 amount=100,
@@ -234,6 +250,7 @@ def test_get_all_filters_by_partial_document_name():
 
     transactions = jsonable_encoder(response["result"]["transactions"])
     assert [trx["trx_id"] for trx in transactions] == ["FILTER-001"]
+    assert transactions[0]["receptor_cuit"] == "30999999991"
     assert transactions[0]["account"]["client"]["email"] == client.email
     assert "hashed_password" not in transactions[0]["account"]["client"]
 

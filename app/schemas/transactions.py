@@ -8,6 +8,8 @@ BUSINESS_TIMEZONE = ZoneInfo("America/Argentina/Buenos_Aires")
 
 class DocumentRequest(BaseModel):
   document_name: Optional[str] = None
+  file_sha256: Optional[str] = Field(None, pattern=r"^[0-9a-fA-F]{64}$")
+  receipt_fingerprint: Optional[str] = Field(None, pattern=r"^[0-9a-fA-F]{64}$")
   amount: float = Field(..., gt=0, description="Transaction amount, must be greater than 0")
   trx_id: Optional[str] = None
   emisor_name: Optional[str] = None
