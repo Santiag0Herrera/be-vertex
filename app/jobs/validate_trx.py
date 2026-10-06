@@ -162,7 +162,7 @@ def filter_reconciliation_accounts(accounts, owned_account_identifiers=None):
                 sorted(account.keys()),
             )
             continue
-        identifiers = account_identifiers(account)
+        identifiers = account_identifier_aliases(account.get("account_number"))
         if owned_account_identifiers is not None and not (
             identifiers & owned_account_identifiers
         ):

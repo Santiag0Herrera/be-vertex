@@ -31,7 +31,7 @@ def test_document_request_rejects_a_future_received_date():
         )
 
 
-def test_create_multiple_stores_document_name_on_every_transaction():
+def test_create_multiple_stores_document_name_and_owner_account_number():
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)
     db = sessionmaker(bind=engine)()

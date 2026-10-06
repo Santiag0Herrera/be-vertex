@@ -43,13 +43,15 @@ def _entity_cbus(db: Session, entity_id: int) -> set[str]:
     return {_normalize_account(row[0]) for row in rows}
 
 
-def _filter_entity_accounts(accounts: list[dict], owned_cbus: set[str]) -> list[dict]:
+def _filter_entity_accounts(
+    accounts: list[dict],
+    owned_account_numbers: set[str],
+) -> list[dict]:
     return [
         account
         for account in accounts
-        if _normalize_account(account.get("account_cbu")) in owned_cbus
-        or _normalize_account(account.get("cbu")) in owned_cbus
-        or _normalize_account(account.get("account_number")) in owned_cbus
+        if _normalize_account(account.get("account_number"))
+        in owned_account_numbers
     ]
 
 

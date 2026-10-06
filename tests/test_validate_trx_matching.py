@@ -236,10 +236,25 @@ def test_reconciliation_accounts_are_limited_to_owned_accounts():
 
     result = validate_trx.filter_reconciliation_accounts(
         accounts,
-        owned_account_identifiers={"000123"},
+        owned_account_identifiers={"111"},
     )
 
     assert result == [accounts[0]]
+
+
+def test_reconciliation_account_ownership_does_not_match_account_cbu():
+    account = {
+        "account_number": "111",
+        "bank_number": "015",
+        "account_cbu": "000-123",
+    }
+
+    result = validate_trx.filter_reconciliation_accounts(
+        [account],
+        owned_account_identifiers={"000123"},
+    )
+
+    assert result == []
 
 
 def test_account_matching_tolerates_formatting_and_missing_leading_zero():
@@ -292,7 +307,7 @@ def test_account_matching_does_not_guess_when_zero_less_alias_is_ambiguous():
     assert reason == "ambiguous_destination_account"
 
 
-def test_entity_account_filter_supports_nested_cbu_payload():
+def test_entity_account_filter_normalizes_account_number():
     account = {
         "account_number": "123",
         "bank_number": "015",
@@ -396,7 +411,7 @@ async def test_reconciliation_reuses_one_movement_request_for_same_account_and_d
     monkeypatch.setattr(
         validate_trx,
         "get_entity_account_identifiers",
-        lambda entity_id: {"000123"},
+        lambda entity_id: validate_trx.account_identifier_aliases("123456"),
     )
     monkeypatch.setattr(
         validate_trx,
@@ -443,7 +458,7 @@ async def test_unavailable_destination_is_reported_by_reason(monkeypatch):
     monkeypatch.setattr(
         validate_trx,
         "get_entity_account_identifiers",
-        lambda entity_id: {"000123", "123"},
+        lambda entity_id: validate_trx.account_identifier_aliases("123456"),
     )
     monkeypatch.setattr(
         validate_trx,
@@ -485,7 +500,7 @@ async def test_truncated_movement_response_leaves_batch_pending(monkeypatch):
     monkeypatch.setattr(
         validate_trx,
         "get_entity_account_identifiers",
-        lambda entity_id: {"000123"},
+        lambda entity_id: validate_trx.account_identifier_aliases("123456"),
     )
     monkeypatch.setattr(
         validate_trx,

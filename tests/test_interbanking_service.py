@@ -162,13 +162,14 @@ async def test_concurrent_services_share_a_single_token_refresh(monkeypatch):
     assert second_service.token == "VALID-TOKEN"
 
 
-def test_interbanking_accounts_are_filtered_by_entity_cbu():
+def test_interbanking_accounts_are_filtered_by_entity_account_number():
     accounts = [
         {"account_number": "111", "account_cbu": "000-123"},
         {"account_number": "222", "account_cbu": "000-999"},
     ]
 
-    assert _filter_entity_accounts(accounts, {"000123"}) == [accounts[0]]
+    assert _filter_entity_accounts(accounts, {"111"}) == [accounts[0]]
+    assert _filter_entity_accounts(accounts, {"000123"}) == []
 
 
 @pytest.mark.asyncio
