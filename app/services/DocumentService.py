@@ -9,6 +9,7 @@ from typing import Iterable
 from botocore.exceptions import BotoCoreError, ClientError
 from fastapi import HTTPException, status
 from sqlalchemy import func
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload
 
 from app.models import DocumentUploadSession, TransactionDocument, Trx
@@ -327,6 +328,8 @@ class DocumentService:
                 detail="Transactions and uploaded documents do not match",
             )
 
+        staging_keys = [document.staging_key for document in session.documents]
+
         try:
             session.status = "committing"
             for document in session.documents:
@@ -334,21 +337,18 @@ class DocumentService:
                 document.status = "staged"
                 document.uploaded_at = _utcnow()
 
-            transactions = TransactionsService(
+            build = TransactionsService(
                 self.db,
                 self.req_user,
             ).build_multiple(request)
-            transactions_by_client_id = {
-                str(transaction_request.client_document_id): transaction
-                for transaction_request, transaction in zip(
-                    request.transactions,
-                    transactions,
-                )
-                if transaction_request.client_document_id is not None
-            }
+            transactions_by_client_id = build.transactions_by_client_document_id
 
             now = _utcnow()
             for client_document_id, document in session_documents.items():
+                transaction = transactions_by_client_id.get(client_document_id)
+                if transaction is None:
+                    self.db.delete(document)
+                    continue
                 destination_key = self.storage.object_key(
                     self.entity_id,
                     document.id,
@@ -356,19 +356,32 @@ class DocumentService:
                 self.storage.copy(document.staging_key, destination_key)
                 copied_keys.append(destination_key)
                 document.object_key = destination_key
-                document.trx_id = transactions_by_client_id[client_document_id].id
+                document.trx_id = transaction.id
                 document.status = "active"
                 document.activated_at = now
 
-            result = {"created": len(transactions), "duplicates": []}
+            result = {
+                "created": len(build.transactions),
+                "duplicates": build.duplicates,
+            }
             session.status = "committed"
             session.committed_at = now
-            session.result_json = json.dumps(result)
+            session.result_json = json.dumps(result, default=str)
             self.db.commit()
         except HTTPException:
             self.db.rollback()
             self._delete_compensating_copies(copied_keys)
             raise
+        except IntegrityError as exc:
+            self.db.rollback()
+            self._delete_compensating_copies(copied_keys)
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "duplicate_receipt",
+                    "message": "A receipt was uploaded concurrently. Retry the request.",
+                },
+            ) from exc
         except (BotoCoreError, ClientError) as exc:
             self.db.rollback()
             self._delete_compensating_copies(copied_keys)
@@ -385,15 +398,15 @@ class DocumentService:
             self._delete_compensating_copies(copied_keys)
             raise
 
-        for document in session.documents:
+        for staging_key in staging_keys:
             try:
-                self.storage.delete(document.staging_key)
+                self.storage.delete(staging_key)
             except (BotoCoreError, ClientError):
                 logger.warning(
                     "Could not remove staged document after commit",
                     extra={
                         "event": "staging_cleanup_failed",
-                        "document_id": document.id,
+                        "session_id": session_id,
                     },
                 )
 

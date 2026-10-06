@@ -25,8 +25,7 @@ from app.router import (
     payment_orders,
     balance,
     currency,
-    extractor,
-    textract,
+    gemini_extractor,
     logs,
     dashboard,
     documents,
@@ -47,7 +46,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
-    expose_headers=["Content-Disposition"],
+    expose_headers=["Content-Disposition", "X-Request-ID"],
 )
 
 create_tables()
@@ -61,8 +60,7 @@ app.include_router(payments.router)
 app.include_router(payment_orders.router)
 app.include_router(balance.router)
 app.include_router(currency.router)
-app.include_router(extractor.router)
-app.include_router(textract.router)
+app.include_router(gemini_extractor.router)
 app.include_router(logs.router)
 app.include_router(dashboard.router)
 app.include_router(documents.router)

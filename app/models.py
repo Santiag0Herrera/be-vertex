@@ -92,6 +92,22 @@ class Trx(Base):
     __tablename__ = "trx"
     __table_args__ = (
         Index(
+            "uq_trx_entity_file_sha256",
+            "entity_id",
+            "file_sha256",
+            unique=True,
+            postgresql_where=text("file_sha256 IS NOT NULL"),
+            sqlite_where=text("file_sha256 IS NOT NULL"),
+        ),
+        Index(
+            "uq_trx_entity_receipt_fingerprint",
+            "entity_id",
+            "receipt_fingerprint",
+            unique=True,
+            postgresql_where=text("receipt_fingerprint IS NOT NULL"),
+            sqlite_where=text("receipt_fingerprint IS NOT NULL"),
+        ),
+        Index(
             "uq_trx_conciliated_document_fingerprint",
             "document_fingerprint",
             unique=True,
@@ -104,13 +120,17 @@ class Trx(Base):
         ),
     )
 
+    file_sha256 = Column(String(64), nullable=True)
+    receipt_fingerprint = Column(String(64), nullable=True)
+    source_trx_id = Column(String, nullable=True, index=True)
     document_fingerprint = Column(String, nullable=True, index=True)
     document_name = Column(String, nullable=True)
     id = Column(Integer, primary_key=True, index=True)
     trx_id = Column(String, unique=True)
     emisor_cbu = Column(String, nullable=True)
-    emisor_name = Column(String, nullable=False)
-    emisor_cuit = Column(String, nullable=False)
+    emisor_name = Column(String, nullable=True)
+    emisor_cuit = Column(String, nullable=True)
+    receptor_cuit = Column(String, nullable=True)
     receptor_cbu = Column(String, nullable=False)
     entity_id = Column(Integer, ForeignKey("entities.id"))
     client_id = Column(Integer, ForeignKey("clients.id"))

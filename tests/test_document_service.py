@@ -175,6 +175,63 @@ def test_upload_session_commits_document_and_is_idempotent():
         engine.dispose()
 
 
+def test_duplicate_receipt_does_not_leave_a_persisted_document():
+    engine, db = _database()
+    try:
+        _, _, _, account, request_user = _seed(db)
+        storage = FakeStorage()
+        service = DocumentService(db, request_user, storage=storage)
+
+        def create_receipt(file_sha256: str, client_document_id):
+            upload_session = service.create_upload_session(
+                CreateUploadSessionRequest(
+                    documents=[
+                        UploadDocumentRequest(
+                            client_document_id=client_document_id,
+                            original_name="comprobante.pdf",
+                            mime_type="application/pdf",
+                            size_bytes=100,
+                            sha256=file_sha256,
+                        )
+                    ]
+                )
+            )
+            return service.create_multiple_transactions(
+                MultipleDocumentRequest(
+                    upload_session_id=upload_session["upload_session_id"],
+                    account_id=account.id,
+                    owner_account_number="09170210248397",
+                    transactions=[
+                        DocumentRequest(
+                            client_document_id=client_document_id,
+                            document_name="comprobante.pdf",
+                            file_sha256=file_sha256,
+                            amount=100,
+                            date=datetime.datetime(2026, 10, 5, 10, 30),
+                        )
+                    ],
+                )
+            )
+
+        first_response = create_receipt("d" * 64, uuid4())
+        copies_after_first_receipt = len(storage.copied)
+        second_client_document_id = uuid4()
+        duplicate_response = create_receipt("e" * 64, second_client_document_id)
+
+        assert first_response["result"]["created"] == 1
+        assert duplicate_response["result"]["created"] == 0
+        assert len(duplicate_response["result"]["duplicates"]) == 1
+        assert db.query(Trx).count() == 1
+        assert db.query(TransactionDocument).count() == 1
+        assert len(storage.copied) == copies_after_first_receipt
+        assert all(
+            not key.startswith("staging/") for key in storage.documents
+        )
+    finally:
+        db.close()
+        engine.dispose()
+
+
 def test_manual_delete_only_removes_expired_active_documents():
     engine, db = _database()
     try:

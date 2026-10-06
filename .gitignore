@@ -96,3 +96,9 @@ local_settings.py
 !migrations/20260925_transaction_received_date.sql
 # Migración requerida para la integridad de la conciliación
 !migrations/20260929_reconciliation_integrity.sql
+# Migración requerida para detectar comprobantes repetidos durante la carga
+!migrations/20261006_receipt_identity.sql
+# Migración requerida para conservar los datos obligatorios del comprobante
+!migrations/20261006_trx_required_receipt_fields.sql
+# Migración para permitir comprobantes sin datos opcionales del emisor
+!migrations/20261006_relax_receipt_identity.sql

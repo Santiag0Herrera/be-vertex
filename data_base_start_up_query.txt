@@ -103,12 +103,16 @@ CREATE TABLE IF NOT EXISTS endpoints (
 
 CREATE TABLE IF NOT EXISTS trx (
     id SERIAL PRIMARY KEY,
+    file_sha256 VARCHAR(64),
+    receipt_fingerprint VARCHAR(64),
+    source_trx_id VARCHAR(255),
     document_fingerprint VARCHAR(255),
     document_name VARCHAR(255),
     trx_id VARCHAR(255) UNIQUE,
     emisor_cbu VARCHAR(255),
-    emisor_name VARCHAR(255) NOT NULL,
-    emisor_cuit VARCHAR(255) NOT NULL,
+    emisor_name VARCHAR(255),
+    emisor_cuit VARCHAR(255),
+    receptor_cuit VARCHAR(255),
     receptor_cbu VARCHAR(255) NOT NULL,
     entity_id INTEGER REFERENCES entities(id),
     client_id INTEGER REFERENCES clients(id),
@@ -157,6 +161,13 @@ CREATE INDEX IF NOT EXISTS idx_fee_withdrawals_entity_id ON fee_withdrawals(enti
 CREATE INDEX IF NOT EXISTS idx_fee_withdrawals_currency_id ON fee_withdrawals(currency_id);
 CREATE INDEX IF NOT EXISTS idx_endpoints_perm_id ON endpoints(perm_id);
 CREATE INDEX IF NOT EXISTS idx_trx_document_fingerprint ON trx(document_fingerprint);
+CREATE INDEX IF NOT EXISTS ix_trx_source_trx_id ON trx(source_trx_id);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_trx_entity_file_sha256
+ON trx(entity_id, file_sha256)
+WHERE file_sha256 IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_trx_entity_receipt_fingerprint
+ON trx(entity_id, receipt_fingerprint)
+WHERE receipt_fingerprint IS NOT NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS uq_trx_conciliated_document_fingerprint
 ON trx(document_fingerprint)
 WHERE status = 'conciliado' AND document_fingerprint IS NOT NULL;

@@ -57,6 +57,9 @@ class ResponseSerializationService:
       document_status = "unavailable"
 
     return {
+      "file_sha256": transaction.file_sha256,
+      "receipt_fingerprint": transaction.receipt_fingerprint,
+      "source_trx_id": transaction.source_trx_id,
       "document_fingerprint": transaction.document_fingerprint,
       "document_name": transaction.document_name,
       "id": transaction.id,
@@ -64,6 +67,7 @@ class ResponseSerializationService:
       "emisor_cbu": transaction.emisor_cbu,
       "emisor_name": transaction.emisor_name,
       "emisor_cuit": transaction.emisor_cuit,
+      "receptor_cuit": transaction.receptor_cuit,
       "receptor_cbu": transaction.receptor_cbu,
       "entity_id": transaction.entity_id,
       "client_id": transaction.client_id,
