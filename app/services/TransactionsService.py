@@ -114,6 +114,7 @@ class TransactionsService:
             .options(
                 joinedload(Trx.account).joinedload(CustomersBalance.client),
                 joinedload(Trx.account).joinedload(CustomersBalance.currency),
+                joinedload(Trx.document),
             )
             .join(CustomersBalance, Trx.account_id == CustomersBalance.id)
             .join(Clients, CustomersBalance.client_id == Clients.id)
@@ -243,7 +244,7 @@ class TransactionsService:
         self.db.commit()
         return self.success.response("Transaction registered!")
 
-    def create_multiple(self, multiple_trx_request: MultipleDocumentRequest):
+    def build_multiple(self, multiple_trx_request: MultipleDocumentRequest):
         account_model = self._get_scoped_account(multiple_trx_request.account_id)
         entity_model = (
             self.db.query(Entity)
@@ -297,7 +298,17 @@ class TransactionsService:
             new_trx.append(trx_model)
             self.db.add(trx_model)
 
-        self.db.commit()
+        self.db.flush()
+        return new_trx
+
+    def create_multiple(self, multiple_trx_request: MultipleDocumentRequest):
+        try:
+            new_trx = self.build_multiple(multiple_trx_request)
+            self.db.commit()
+        except Exception:
+            self.db.rollback()
+            raise
+
         return self.success.response(
             {"created": len(new_trx), "duplicates": []}
         )
@@ -325,6 +336,7 @@ class TransactionsService:
             .options(
                 joinedload(Trx.account).joinedload(CustomersBalance.client),
                 joinedload(Trx.account).joinedload(CustomersBalance.currency),
+                joinedload(Trx.document),
             )
             .join(CustomersBalance, Trx.account_id == CustomersBalance.id)
             .filter(

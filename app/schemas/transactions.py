@@ -1,12 +1,14 @@
 from pydantic import BaseModel, Field, field_validator
 from datetime import date as dt_date, datetime
 from typing import Optional
+from uuid import UUID
 from zoneinfo import ZoneInfo
 
 
 BUSINESS_TIMEZONE = ZoneInfo("America/Argentina/Buenos_Aires")
 
 class DocumentRequest(BaseModel):
+  client_document_id: Optional[UUID] = None
   document_name: Optional[str] = None
   amount: float = Field(..., gt=0, description="Transaction amount, must be greater than 0")
   trx_id: Optional[str] = None
@@ -53,6 +55,7 @@ class DocumentRequest(BaseModel):
 
 
 class MultipleDocumentRequest(BaseModel):
+  upload_session_id: Optional[UUID] = None
   transactions: list[DocumentRequest]
   account_id: int
   owner_account_number: str

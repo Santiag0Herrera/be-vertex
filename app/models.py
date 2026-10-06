@@ -1,6 +1,6 @@
 from datetime import datetime
 from zoneinfo import ZoneInfo
-from sqlalchemy import Column, Date, DateTime, Integer, String, Float, ForeignKey, Boolean, Numeric, CheckConstraint, Index, text
+from sqlalchemy import BigInteger, Column, Date, DateTime, Integer, String, Float, ForeignKey, Boolean, Numeric, CheckConstraint, Index, Text, UniqueConstraint, text
 from sqlalchemy.orm import relationship
 
 from app.db.database import Base
@@ -42,6 +42,8 @@ class Entity(Base):
     users = relationship("Users", back_populates="entity")
     clients = relationship("Clients", back_populates="entity")
     trxs = relationship("Trx", back_populates="entity")
+    document_upload_sessions = relationship("DocumentUploadSession", back_populates="entity")
+    transaction_documents = relationship("TransactionDocument", back_populates="entity")
     cbus = relationship("EntityCBU", back_populates="entity", cascade="all, delete-orphan")
 
 
@@ -116,6 +118,7 @@ class Trx(Base):
     date = Column(DateTime, nullable=False)
     received_date = Column(Date, nullable=False, default=business_today)
     creation_date = Column(DateTime, default=datetime.utcnow)
+    reconciled_at = Column(DateTime(timezone=True), nullable=True)
     status = Column(String, nullable=False)
     account_id = Column(Integer, ForeignKey("customers_balance.id"), nullable=False)
     applied_fee_percentage = Column(Float, nullable=True)
@@ -124,6 +127,80 @@ class Trx(Base):
     entity = relationship("Entity", back_populates="trxs")
     client = relationship("Clients", back_populates="trxs")
     account = relationship("CustomersBalance")
+    document = relationship("TransactionDocument", back_populates="trx", uselist=False)
+
+
+class DocumentUploadSession(Base):
+    __tablename__ = "document_upload_sessions"
+
+    id = Column(String(36), primary_key=True)
+    entity_id = Column(Integer, ForeignKey("entities.id"), nullable=False, index=True)
+    actor_id = Column(Integer, nullable=False)
+    actor_type = Column(String(20), nullable=False)
+    status = Column(String(20), nullable=False, default="created", index=True)
+    expires_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    committed_at = Column(DateTime(timezone=True), nullable=True)
+    result_json = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+    updated_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+    )
+
+    entity = relationship("Entity", back_populates="document_upload_sessions")
+    documents = relationship(
+        "TransactionDocument",
+        back_populates="upload_session",
+        cascade="all, delete-orphan",
+    )
+
+
+class TransactionDocument(Base):
+    __tablename__ = "transaction_documents"
+    __table_args__ = (
+        UniqueConstraint(
+            "upload_session_id",
+            "client_document_id",
+            name="uq_transaction_documents_session_client_id",
+        ),
+    )
+
+    id = Column(String(36), primary_key=True)
+    upload_session_id = Column(
+        String(36),
+        ForeignKey("document_upload_sessions.id"),
+        nullable=False,
+        index=True,
+    )
+    client_document_id = Column(String(36), nullable=False)
+    trx_id = Column(Integer, ForeignKey("trx.id"), nullable=True, unique=True, index=True)
+    entity_id = Column(Integer, ForeignKey("entities.id"), nullable=False, index=True)
+    staging_key = Column(String, nullable=False, unique=True)
+    object_key = Column(String, nullable=True, unique=True)
+    original_name = Column(String(255), nullable=False)
+    mime_type = Column(String(100), nullable=False)
+    size_bytes = Column(BigInteger, nullable=False)
+    sha256 = Column(String(64), nullable=False)
+    status = Column(String(30), nullable=False, default="pending_upload", index=True)
+    uploaded_at = Column(DateTime(timezone=True), nullable=True)
+    activated_at = Column(DateTime(timezone=True), nullable=True)
+    delete_after = Column(DateTime(timezone=True), nullable=True, index=True)
+    deleted_at = Column(DateTime(timezone=True), nullable=True)
+    deletion_attempts = Column(Integer, nullable=False, default=0)
+    last_deletion_error = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+    updated_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+    )
+
+    upload_session = relationship("DocumentUploadSession", back_populates="documents")
+    trx = relationship("Trx", back_populates="document")
+    entity = relationship("Entity", back_populates="transaction_documents")
 
 
 # CBU Model

@@ -15,6 +15,7 @@ from fastapi import HTTPException
 from sqlalchemy import bindparam, text
 
 from app.db.database import SessionLocal
+from app.models import TransactionDocument, Trx
 from app.services.BusinessCalendarService import BusinessCalendarService
 from app.services.InterBankingService import InterBankingService
 from app.bank_codes import codes
@@ -582,7 +583,12 @@ def update_trx_status(
               status = :status,
               document_fingerprint = :document_fingerprint,
               applied_fee_percentage = :applied_fee_percentage,
-              fee_amount = :fee_amount
+              fee_amount = :fee_amount,
+              reconciled_at = CASE
+                  WHEN :status = 'conciliado'
+                  THEN COALESCE(reconciled_at, CURRENT_TIMESTAMP)
+                  ELSE reconciled_at
+              END
           WHERE trx_id = :trx_id
             AND status = 'pendiente'
         """),
@@ -591,7 +597,7 @@ def update_trx_status(
             "trx_id": trx_id,
             "document_fingerprint": document_fingerprint,
             "applied_fee_percentage": fee_percentage or 0,
-            "fee_amount": fee_amount,
+            "fee_amount": float(fee_amount),
         },
         )
 
@@ -602,6 +608,31 @@ def update_trx_status(
                 trx_id,
             )
             return False
+
+        if new_status == "conciliado":
+            reconciled_transaction = (
+                db.query(Trx).filter(Trx.trx_id == trx_id).one()
+            )
+            delete_after = reconciled_transaction.reconciled_at + relativedelta(
+                months=2
+            )
+            (
+                db.query(TransactionDocument)
+                .filter(
+                    TransactionDocument.trx_id == reconciled_transaction.id,
+                    TransactionDocument.status == "active",
+                    TransactionDocument.delete_after.is_(None),
+                )
+                .update(
+                    {
+                        TransactionDocument.delete_after: delete_after,
+                        TransactionDocument.updated_at: datetime.datetime.now(
+                            datetime.timezone.utc
+                        ),
+                    },
+                    synchronize_session=False,
+                )
+            )
 
         balance_result = db.execute(
             text("""
@@ -614,8 +645,8 @@ def update_trx_status(
                   AND enabled = TRUE
             """),
             {
-                "customer_amount": customer_amount,
-                "fee_amount": fee_amount,
+                "customer_amount": float(customer_amount),
+                "fee_amount": float(fee_amount),
                 "id": customer_balance_id,
             },
         )

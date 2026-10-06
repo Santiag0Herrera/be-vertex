@@ -29,6 +29,7 @@ from app.router import (
     textract,
     logs,
     dashboard,
+    documents,
 )
 
 ENV = os.getenv("ENVIRONMENT", "dev")
@@ -64,3 +65,4 @@ app.include_router(extractor.router)
 app.include_router(textract.router)
 app.include_router(logs.router)
 app.include_router(dashboard.router)
+app.include_router(documents.router)
