@@ -2,9 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-import re
-import unicodedata
-from datetime import date, datetime
+from datetime import date, datetime, time
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from typing import Any
 
@@ -15,9 +13,6 @@ from app.models import Trx
 
 
 REQUIRED_RECEIPT_IDENTITY_FIELDS = (
-    "trx_id",
-    "emisor_cuit",
-    "receptor_cuit",
     "amount",
     "date",
 )
@@ -33,21 +28,21 @@ def _value(document: Any, field: str):
     return getattr(document, field, None)
 
 
-def _normalize_identifier(value: Any) -> str:
-    normalized = unicodedata.normalize("NFKC", str(value or "")).upper()
-    return re.sub(r"[^0-9A-Z]", "", normalized)
-
-
-def _normalize_cuit(value: Any) -> str:
-    return re.sub(r"\D", "", str(value or ""))
-
-
-def _normalize_date(value: Any) -> str:
+def _normalize_datetime(value: Any) -> str:
     if isinstance(value, datetime):
-        return value.date().isoformat()
-    if isinstance(value, date):
-        return value.isoformat()
-    return date.fromisoformat(str(value).strip()[:10]).isoformat()
+        parsed = value
+    elif isinstance(value, date):
+        parsed = datetime.combine(value, time.min)
+    else:
+        raw = str(value).strip().replace("Z", "+00:00")
+        try:
+            parsed = datetime.fromisoformat(raw)
+        except ValueError:
+            parsed = datetime.combine(date.fromisoformat(raw[:10]), time.min)
+
+    if parsed.tzinfo is not None:
+        parsed = parsed.replace(tzinfo=None)
+    return parsed.isoformat(timespec="seconds")
 
 
 def _amount_in_cents(value: Any) -> int:
@@ -77,19 +72,10 @@ def build_receipt_fingerprint(document: Any) -> str:
         )
 
     payload = {
-        "version": 1,
-        "trx_id": _normalize_identifier(_value(document, "trx_id")),
-        "emisor_cuit": _normalize_cuit(_value(document, "emisor_cuit")),
-        "receptor_cuit": _normalize_cuit(_value(document, "receptor_cuit")),
+        "version": 2,
         "amount_cents": _amount_in_cents(_value(document, "amount")),
-        "date": _normalize_date(_value(document, "date")),
+        "transaction_datetime": _normalize_datetime(_value(document, "date")),
     }
-    if len(payload["trx_id"]) < 4:
-        raise ValueError("trx_id must contain at least 4 usable characters")
-    if len(payload["emisor_cuit"]) != 11:
-        raise ValueError("emisor_cuit must contain 11 digits")
-    if len(payload["receptor_cuit"]) != 11:
-        raise ValueError("receptor_cuit must contain 11 digits")
 
     canonical = json.dumps(
         payload,

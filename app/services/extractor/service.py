@@ -157,9 +157,6 @@ async def call_gemini_or_raise(
             content_type=content_type,
             required_fields={
                 "amount",
-                "trx_id",
-                "emisor_cuit",
-                "receptor_cuit",
                 "date",
             },
             request_id=request_id,

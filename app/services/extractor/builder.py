@@ -14,9 +14,6 @@ from app.services.extractor.scoring import extract_semantic_candidates
 
 REQUIRED_FOR_DOCUMENT = {
     "amount",
-    "trx_id",
-    "emisor_cuit",
-    "receptor_cuit",
     "date",
 }
 

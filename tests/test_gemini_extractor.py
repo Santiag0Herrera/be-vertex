@@ -1,3 +1,4 @@
+from datetime import datetime
 from io import BytesIO
 from unittest.mock import AsyncMock
 
@@ -28,7 +29,7 @@ def complete_gemini_result() -> GeminiDocumentFields:
         receptor_name=None,
         receptor_cuit="20327213548",
         receptor_cbu="0170043520000005091629",
-        date="2026-09-18",
+        date="2026-09-18T15:54:00",
     )
 
 
@@ -66,6 +67,31 @@ async def test_pdf_is_sent_directly_to_gemini(monkeypatch):
 
     assert extract_mock.await_args.kwargs["data"] == b"receipt-bytes"
     assert extract_mock.await_args.kwargs["content_type"] == "application/pdf"
+
+
+@pytest.mark.asyncio
+async def test_extractor_accepts_receipt_without_optional_identity_fields(monkeypatch):
+    extract_mock = AsyncMock(
+        return_value=GeminiDocumentFields(
+            amount="33.00",
+            date="2026-09-18T15:54:00",
+        )
+    )
+    monkeypatch.setattr(service, "extract_document_fields", extract_mock)
+
+    result = await service.extract_document_from_file(
+        upload_file(),
+        request_id="gemini-minimal",
+    )
+
+    assert result.ok is True
+    assert result.document is not None
+    assert result.document.amount == 33
+    assert result.document.date == datetime(2026, 9, 18, 15, 54)
+    assert result.document.trx_id is None
+    assert result.document.emisor_cuit is None
+    assert result.document.receipt_fingerprint
+    assert result.missing == []
 
 
 @pytest.mark.asyncio

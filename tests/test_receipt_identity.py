@@ -1,5 +1,5 @@
 import json
-from datetime import date
+from datetime import datetime
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -32,7 +32,7 @@ def complete_document(**overrides):
         "emisor_cuit": "20-12345678-9",
         "receptor_name": "Receptor",
         "receptor_cuit": "30-98765432-1",
-        "date": date(2026, 10, 6),
+        "date": datetime(2026, 10, 6, 14, 30),
     }
     values.update(overrides)
     return DocumentRequest(**values)
@@ -90,9 +90,22 @@ def test_semantic_fingerprint_survives_formatting_changes():
     assert build_receipt_fingerprint(first) == build_receipt_fingerprint(second)
 
 
-def test_semantic_fingerprint_changes_for_a_different_operation():
+def test_semantic_fingerprint_ignores_optional_operation_and_sender_data():
     first = complete_document()
-    second = complete_document(trx_id="OP-ABC-124")
+    second = complete_document(
+        trx_id=None,
+        emisor_name=None,
+        emisor_cuit=None,
+        receptor_name=None,
+        receptor_cuit=None,
+    )
+
+    assert build_receipt_fingerprint(first) == build_receipt_fingerprint(second)
+
+
+def test_semantic_fingerprint_changes_for_a_different_time():
+    first = complete_document()
+    second = complete_document(date=datetime(2026, 10, 6, 14, 31))
 
     assert build_receipt_fingerprint(first) != build_receipt_fingerprint(second)
 
@@ -167,6 +180,25 @@ def test_duplicate_inside_one_batch_is_not_created_twice():
         "receipt_fingerprint"
     ]
     assert db.query(Trx).count() == 1
+    db.close()
+
+
+def test_receipt_without_optional_sender_data_can_be_created():
+    db, _, account, service = transaction_context()
+    minimal = DocumentRequest(
+        amount=1500,
+        date=datetime(2026, 10, 6, 14, 30),
+    )
+
+    result = service.create_multiple(multiple_request(account.id, minimal))
+    transaction = db.query(Trx).one()
+
+    assert result["result"]["created"] == 1
+    assert transaction.source_trx_id is None
+    assert transaction.emisor_name is None
+    assert transaction.emisor_cuit is None
+    assert transaction.emisor_cbu is None
+    assert transaction.receipt_fingerprint
     db.close()
 
 

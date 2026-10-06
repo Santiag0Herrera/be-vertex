@@ -27,7 +27,7 @@ from .ReceiptIdentityService import (
 
 @dataclass(frozen=True)
 class ReceiptIdentity:
-    source_trx_id: str
+    source_trx_id: str | None
     file_sha256: str | None
     receipt_fingerprint: str
 
@@ -117,7 +117,11 @@ class TransactionsService:
             self.error.raise_bad_request(str(exc))
 
         return ReceiptIdentity(
-            source_trx_id=str(document_request.trx_id).strip(),
+            source_trx_id=(
+                str(document_request.trx_id).strip()
+                if document_request.trx_id
+                else None
+            ),
             file_sha256=(
                 str(document_request.file_sha256).strip().lower()
                 if document_request.file_sha256
@@ -280,8 +284,11 @@ class TransactionsService:
         )
         self.error.raise_if_none(cbu_model)
 
+        internal_trx_id = (
+            document_request.trx_id or f"AUTO-{uuid.uuid4().hex[:16].upper()}"
+        )
         trx_exists_model = (
-            self.db.query(Trx).filter(Trx.trx_id == document_request.trx_id).first()
+            self.db.query(Trx).filter(Trx.trx_id == internal_trx_id).first()
         )
         if trx_exists_model:
             self.error.raise_conflict("Transaction already exists")
@@ -312,7 +319,7 @@ class TransactionsService:
             date=document_request.date,
             received_date=self._received_date(document_request.received_date),
             creation_date=datetime.datetime.utcnow(),
-            trx_id=document_request.trx_id,
+            trx_id=internal_trx_id,
             account_id=document_request.account_id,
             status="pendiente",
         )
@@ -360,8 +367,8 @@ class TransactionsService:
             receptor_account_number = owner_account.cbu.nro
         new_trx = []
         duplicates = []
-        seen_file_hashes: dict[str, str] = {}
-        seen_receipt_fingerprints: dict[str, str] = {}
+        seen_file_hashes: dict[str, str | None] = {}
+        seen_receipt_fingerprints: dict[str, str | None] = {}
         for doc in multiple_trx_request.transactions:
             identity = self._receipt_identity(doc)
             matched_in_batch = []
@@ -415,9 +422,9 @@ class TransactionsService:
                 )
                 continue
 
-            emisor_name = doc.emisor_name or entity_model.name
+            emisor_name = doc.emisor_name
             emisor_cuit = doc.emisor_cuit
-            emisor_cbu = doc.emisor_cbu or receptor_account_number
+            emisor_cbu = doc.emisor_cbu
             internal_trx_id = f"AUTO-{uuid.uuid4().hex[:16].upper()}"
             trx_model = Trx(
                 file_sha256=identity.file_sha256,
