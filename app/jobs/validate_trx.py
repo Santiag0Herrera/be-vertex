@@ -4,6 +4,7 @@ import asyncio
 import datetime
 import hashlib
 import logging
+import re
 from collections import Counter, defaultdict
 from contextlib import contextmanager
 from decimal import Decimal
@@ -67,7 +68,30 @@ EMPTY_MOVEMENT_IDENTIFIER_VALUES = {
 
 
 def normalize_account(value):
+    """Keep the legacy normalization used by persisted bank fingerprints."""
     return str(value or "").replace(" ", "").replace("-", "").strip()
+
+
+def normalize_account_identifier(value):
+    """Normalize identifiers used only for account lookup and comparison."""
+    return re.sub(r"[^0-9A-Z]", "", str(value or "").strip().upper())
+
+
+def account_identifier_aliases(value):
+    """Return safe aliases for a CBU/account number.
+
+    Interbanking has returned the same account both formatted and without its
+    leading zero.  The zero-less alias is only used through the ambiguity-aware
+    account index, so collisions remain blocked instead of picking an account.
+    """
+    normalized = normalize_account_identifier(value)
+    if not normalized:
+        return set()
+
+    aliases = {normalized}
+    if normalized.isdigit():
+        aliases.add(normalized.lstrip("0") or "0")
+    return aliases
 
 
 def normalize_fingerprint_value(value):
@@ -75,15 +99,14 @@ def normalize_fingerprint_value(value):
 
 
 def account_identifiers(account):
-    return {
-        normalized
-        for value in (
-            account.get("account_cbu"),
-            account.get("cbu"),
-            account.get("account_number"),
-        )
-        if (normalized := normalize_account(value))
-    }
+    cbu = account.get("cbu")
+    if isinstance(cbu, dict):
+        cbu = cbu.get("nro") or cbu.get("number")
+
+    identifiers = set()
+    for value in (account.get("account_cbu"), cbu, account.get("account_number")):
+        identifiers.update(account_identifier_aliases(value))
+    return identifiers
 
 
 def get_bank_name_from_cbu(cbu: str) -> str:
@@ -120,7 +143,10 @@ def get_entity_account_identifiers(entity_id):
             ),
             {"entity_id": entity_id},
         ).all()
-        return {normalize_account(row[0]) for row in rows if row[0]}
+        identifiers = set()
+        for row in rows:
+            identifiers.update(account_identifier_aliases(row[0]))
+        return identifiers
     finally:
         db.close()
 
@@ -150,15 +176,15 @@ def build_account_index(accounts):
     ambiguous_identifiers = set()
     for account in accounts:
         identity = (
-            normalize_account(account.get("bank_number")),
-            normalize_account(account.get("account_number")),
+            normalize_account_identifier(account.get("bank_number")),
+            normalize_account_identifier(account.get("account_number")),
         )
         for identifier in account_identifiers(account):
             existing = account_index.get(identifier)
             if existing is not None:
                 existing_identity = (
-                    normalize_account(existing.get("bank_number")),
-                    normalize_account(existing.get("account_number")),
+                    normalize_account_identifier(existing.get("bank_number")),
+                    normalize_account_identifier(existing.get("account_number")),
                 )
                 if existing_identity != identity:
                     ambiguous_identifiers.add(identifier)
@@ -167,6 +193,28 @@ def build_account_index(accounts):
             if identifier not in ambiguous_identifiers:
                 account_index[identifier] = account
     return account_index, ambiguous_identifiers
+
+
+def resolve_reconciliation_account(
+    receptor,
+    account_index,
+    ambiguous_account_identifiers,
+):
+    """Resolve one destination without guessing across ambiguous accounts."""
+    aliases = account_identifier_aliases(receptor)
+    matches = {
+        (
+            normalize_account_identifier(account.get("bank_number")),
+            normalize_account_identifier(account.get("account_number")),
+        ): account
+        for alias in aliases
+        if (account := account_index.get(alias)) is not None
+    }
+    if len(matches) == 1:
+        return next(iter(matches.values())), None
+    if len(matches) > 1 or aliases & ambiguous_account_identifiers:
+        return None, "ambiguous_destination_account"
+    return None, "destination_account_not_available"
 
 
 def get_used_fingerprints(entity_id=None):
@@ -653,6 +701,7 @@ def build_job_result(
     repeated=0,
     expired=0,
     skipped=0,
+    skipped_by_reason=None,
     movement_requests=0,
     movement_cache_hits=0,
 ):
@@ -663,6 +712,7 @@ def build_job_result(
         "repeated": repeated,
         "expired": expired,
         "skipped": skipped,
+        "skipped_by_reason": dict(skipped_by_reason or {}),
         "still_pending": max(
             0,
             total_pending - conciliated - repeated - expired,
@@ -671,6 +721,35 @@ def build_job_result(
         "movement_cache_hits": movement_cache_hits,
         "duration_seconds": round(duration, 2),
     }
+
+
+def log_job_result(result, outcome="completed"):
+    logger.info(
+        "[JOB END] validate_trx checked=%s conciliated=%s repeated=%s expired=%s skipped=%s still_pending=%s movement_requests=%s movement_cache_hits=%s duration_seconds=%.2f",
+        result["checked"],
+        result["conciliated"],
+        result["repeated"],
+        result["expired"],
+        result["skipped"],
+        result["still_pending"],
+        result["movement_requests"],
+        result["movement_cache_hits"],
+        result["duration_seconds"],
+        extra={
+            "event": "reconciliation_completed",
+            "outcome": outcome,
+            "checked": result["checked"],
+            "conciliated": result["conciliated"],
+            "repeated": result["repeated"],
+            "expired": result["expired"],
+            "skipped": result["skipped"],
+            "skipped_by_reason": result["skipped_by_reason"],
+            "still_pending": result["still_pending"],
+            "movement_requests": result["movement_requests"],
+            "movement_cache_hits": result["movement_cache_hits"],
+            "duration_seconds": result["duration_seconds"],
+        },
+    )
 
 
 async def _run_reconciliation(entity_id=None) -> dict:
@@ -692,8 +771,9 @@ async def _run_reconciliation(entity_id=None) -> dict:
     )
 
     if not pending_transactions:
-        logger.info("[JOB END] no_pending_transactions_found")
-        return build_job_result(started_at, total_pending=0)
+        result = build_job_result(started_at, total_pending=0)
+        log_job_result(result, outcome="no_pending_transactions")
+        return result
 
     expiration_cutoff = get_expiration_cutoff(started_at)
     expired_trx_ids = {
@@ -719,12 +799,13 @@ async def _run_reconciliation(entity_id=None) -> dict:
     )
 
     if not pending_transactions:
-        logger.info("[JOB END] all_pending_transactions_expired")
-        return build_job_result(
+        result = build_job_result(
             started_at,
             total_pending=total_pending,
             expired=expired_trx_count,
         )
+        log_job_result(result, outcome="all_pending_transactions_expired")
+        return result
 
     ib_service = InterBankingService()
     business_calendar = BusinessCalendarService()
@@ -755,26 +836,32 @@ async def _run_reconciliation(entity_id=None) -> dict:
     repeated_trx_count = 0
     checked_trx_count = 0
     skipped_trx_count = 0
+    skipped_by_reason = Counter()
     reconciliation_groups = defaultdict(list)
     settlement_dates = {}
 
     for trx in pending_transactions:
         trx_id = trx["trx_id"]
-        receptor = normalize_account(trx.get("trx_receptor_cbu"))
-        if receptor in ambiguous_account_identifiers:
-            skipped_trx_count += 1
-            logger.error(
-                "[TRX SKIPPED] trx_id=%s reason=ambiguous_destination_account",
-                trx_id,
-            )
-            continue
-
-        account = account_index.get(receptor)
+        receptor = trx.get("trx_receptor_cbu")
+        account, account_error = resolve_reconciliation_account(
+            receptor,
+            account_index,
+            ambiguous_account_identifiers,
+        )
         if account is None:
             skipped_trx_count += 1
+            skipped_by_reason[account_error] += 1
             logger.warning(
-                "[TRX SKIPPED] trx_id=%s reason=destination_account_not_available",
+                "[TRX SKIPPED] trx_id=%s reason=%s receptor=%s",
                 trx_id,
+                account_error,
+                normalize_account_identifier(receptor),
+                extra={
+                    "event": "reconciliation_transaction_skipped",
+                    "trx_id": trx_id,
+                    "reason": account_error,
+                    "receptor": normalize_account_identifier(receptor),
+                },
             )
             continue
 
@@ -787,6 +874,7 @@ async def _run_reconciliation(entity_id=None) -> dict:
             settlement_date = settlement_dates[trx_date]
         except Exception:
             skipped_trx_count += 1
+            skipped_by_reason["settlement_date_failed"] += 1
             logger.exception(
                 "[TRX SKIPPED] trx_id=%s reason=settlement_date_failed",
                 trx_id,
@@ -843,6 +931,7 @@ async def _run_reconciliation(entity_id=None) -> dict:
             movement_index = build_credit_movement_index(movements)
         except Exception:
             skipped_trx_count += len(entries)
+            skipped_by_reason["movement_request_failed"] += len(entries)
             logger.exception(
                 "[BATCH FAILED] account_number=%s bank_number=%s range_start=%s range_end=%s affected_transactions=%s",
                 account_number,
@@ -930,6 +1019,7 @@ async def _run_reconciliation(entity_id=None) -> dict:
                         )
                     else:
                         skipped_trx_count += 1
+                        skipped_by_reason["repeated_status_update_failed"] += 1
                     continue
 
                 fee_percentage = trx.get("fee_percentage")
@@ -956,9 +1046,11 @@ async def _run_reconciliation(entity_id=None) -> dict:
                     )
                 else:
                     skipped_trx_count += 1
+                    skipped_by_reason["conciliation_status_update_failed"] += 1
 
             except Exception:
                 skipped_trx_count += 1
+                skipped_by_reason["transaction_validation_failed"] += 1
                 logger.exception(
                     "[ERROR] trx_validation_failed trx_id=%s account_number=%s",
                     trx_id,
@@ -973,22 +1065,12 @@ async def _run_reconciliation(entity_id=None) -> dict:
         repeated=repeated_trx_count,
         expired=expired_trx_count,
         skipped=skipped_trx_count,
+        skipped_by_reason=skipped_by_reason,
         movement_requests=movement_requests,
         movement_cache_hits=movement_cache_hits,
     )
 
-    logger.info(
-        "[JOB END] validate_trx checked=%s conciliated=%s repeated=%s expired=%s skipped=%s still_pending=%s movement_requests=%s movement_cache_hits=%s duration_seconds=%.2f",
-        result["checked"],
-        result["conciliated"],
-        result["repeated"],
-        result["expired"],
-        result["skipped"],
-        result["still_pending"],
-        result["movement_requests"],
-        result["movement_cache_hits"],
-        result["duration_seconds"],
-    )
+    log_job_result(result)
     return result
 
 

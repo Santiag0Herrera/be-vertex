@@ -242,6 +242,73 @@ def test_reconciliation_accounts_are_limited_to_owned_accounts():
     assert result == [accounts[0]]
 
 
+def test_account_matching_tolerates_formatting_and_missing_leading_zero():
+    account = {
+        "account_number": "9170/210248397",
+        "bank_number": "015",
+        "account_cbu": "015-0001-2345-6789-0123-45",
+    }
+    account_index, ambiguous = validate_trx.build_account_index([account])
+
+    resolved, reason = validate_trx.resolve_reconciliation_account(
+        "09170210248397",
+        account_index,
+        ambiguous,
+    )
+
+    assert resolved == account
+    assert reason is None
+
+
+def test_lookup_normalization_does_not_change_legacy_fingerprint_normalization():
+    value = " 0917-0210/248.397 "
+
+    assert validate_trx.normalize_account(value) == "09170210/248.397"
+    assert validate_trx.normalize_account_identifier(value) == "09170210248397"
+
+
+def test_account_matching_does_not_guess_when_zero_less_alias_is_ambiguous():
+    accounts = [
+        {
+            "account_number": "00123",
+            "bank_number": "015",
+            "account_cbu": "0150000000000000000001",
+        },
+        {
+            "account_number": "123",
+            "bank_number": "072",
+            "account_cbu": "0720000000000000000002",
+        },
+    ]
+    account_index, ambiguous = validate_trx.build_account_index(accounts)
+
+    resolved, reason = validate_trx.resolve_reconciliation_account(
+        "000123",
+        account_index,
+        ambiguous,
+    )
+
+    assert resolved is None
+    assert reason == "ambiguous_destination_account"
+
+
+def test_entity_account_filter_supports_nested_cbu_payload():
+    account = {
+        "account_number": "123",
+        "bank_number": "015",
+        "cbu": {"nro": "000-123"},
+    }
+
+    result = validate_trx.filter_reconciliation_accounts(
+        [account],
+        owned_account_identifiers=validate_trx.account_identifier_aliases(
+            "000123"
+        ),
+    )
+
+    assert result == [account]
+
+
 def test_credit_movement_index_ignores_unrelated_and_invalid_movements():
     selected_movement = _movement()
     movements = [
@@ -311,7 +378,9 @@ class FakeInterbanking:
 @pytest.mark.asyncio
 async def test_reconciliation_reuses_one_movement_request_for_same_account_and_date(
     monkeypatch,
+    caplog,
 ):
+    caplog.set_level("INFO", logger="validate_trx_job")
     trx_date = datetime.datetime.now().replace(hour=12, minute=0, second=0)
     movements = [
         _movement(movement_date=trx_date.isoformat()),
@@ -353,6 +422,54 @@ async def test_reconciliation_reuses_one_movement_request_for_same_account_and_d
     assert result["movement_requests"] == 1
     assert result["movement_cache_hits"] == 1
     assert len(fake_interbanking.movement_calls) == 1
+    completed_log = next(
+        record
+        for record in caplog.records
+        if getattr(record, "event", None) == "reconciliation_completed"
+    )
+    assert completed_log.checked == 2
+    assert completed_log.conciliated == 2
+    assert completed_log.skipped_by_reason == {}
+
+
+@pytest.mark.asyncio
+async def test_unavailable_destination_is_reported_by_reason(monkeypatch):
+    trx_date = datetime.datetime.now().replace(hour=12, minute=0, second=0)
+    pending = [_full_pending_trx("PENDING-1", trx_date)]
+    pending[0]["trx_receptor_cbu"] = "999999"
+    fake_interbanking = FakeInterbanking([])
+
+    monkeypatch.setattr(validate_trx, "get_pending_trx", lambda entity_id: pending)
+    monkeypatch.setattr(
+        validate_trx,
+        "get_entity_account_identifiers",
+        lambda entity_id: {"000123", "123"},
+    )
+    monkeypatch.setattr(
+        validate_trx,
+        "get_used_fingerprints",
+        lambda entity_id=None: {},
+    )
+    monkeypatch.setattr(validate_trx, "expire_old_pending_trx", lambda *args, **kwargs: 0)
+    monkeypatch.setattr(
+        validate_trx,
+        "InterBankingService",
+        lambda: fake_interbanking,
+    )
+    monkeypatch.setattr(
+        validate_trx,
+        "BusinessCalendarService",
+        FakeBusinessCalendar,
+    )
+
+    result = await validate_trx._run_reconciliation(entity_id=1)
+
+    assert result["checked"] == 0
+    assert result["skipped"] == 1
+    assert result["skipped_by_reason"] == {
+        "destination_account_not_available": 1,
+    }
+    assert result["movement_requests"] == 0
 
 
 @pytest.mark.asyncio

@@ -1,4 +1,5 @@
 import datetime
+import re
 from zoneinfo import ZoneInfo
 
 from sqlalchemy.orm import Session, joinedload
@@ -85,6 +86,10 @@ class TransactionsService:
 
     def _received_date(self, value):
         return value or datetime.datetime.now(self.BUSINESS_TIMEZONE).date()
+
+    @staticmethod
+    def _normalize_account(value):
+        return re.sub(r"[^0-9A-Z]", "", str(value or "").strip().upper())
 
     def get_all(
         self,
@@ -250,16 +255,25 @@ class TransactionsService:
         if not receptor_account_number:
             self.error.raise_bad_request("Owner account number is required")
         if self.req_user.get("account_type") == "client":
-            owner_account = (
+            owner_accounts = (
                 self.db.query(EntityCBU)
                 .join(CBU, EntityCBU.cbu_id == CBU.id)
                 .filter(
                     EntityCBU.entity_id == self.req_user.get("entity_id"),
-                    CBU.nro == receptor_account_number,
                 )
-                .first()
+                .all()
+            )
+            owner_account = next(
+                (
+                    entity_cbu
+                    for entity_cbu in owner_accounts
+                    if self._normalize_account(entity_cbu.cbu.nro)
+                    == self._normalize_account(receptor_account_number)
+                ),
+                None,
             )
             self.error.raise_if_none(owner_account, "Owner account")
+            receptor_account_number = owner_account.cbu.nro
         new_trx = []
         for doc in multiple_trx_request.transactions:
             emisor_name = doc.emisor_name or entity_model.name
