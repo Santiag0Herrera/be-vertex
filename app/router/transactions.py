@@ -17,6 +17,7 @@ from app.services.DBService import DBService
 from app.services.InterBankingService import InterBankingService
 from app.services.SuccessService import SuccessService
 from app.services.TransactionReportService import TransactionReportService
+from app.services.DocumentService import DocumentService
 from app.models import CBU, EntityCBU
 from typing import Optional
 
@@ -182,14 +183,29 @@ async def upload_new_document(
 
 
 @router.post("/multiple/new", status_code=status.HTTP_201_CREATED)
-async def upload_multiple_new_document(
+def upload_multiple_new_document(
     db: db_dependency,
     user: user_dependency,
     multiple_trx_request: MultipleDocumentRequest,
 ):
+    if multiple_trx_request.upload_session_id is not None:
+        return DocumentService(db, user).create_multiple_transactions(
+            multiple_trx_request
+        )
     db_service = DBService(db=db, req_user=user)
     trx_model = db_service.trx.create_multiple(multiple_trx_request)
     return trx_model
+
+
+@router.post("/{trx_id}/document-url", status_code=status.HTTP_200_OK)
+def create_transaction_document_url(
+    trx_id: int,
+    db: db_dependency,
+    user: user_dependency,
+):
+    return SuccessService.response(
+        DocumentService(db, user).create_transaction_document_url(trx_id)
+    )
 
 
 @router.get("/get_movement", status_code=status.HTTP_200_OK)

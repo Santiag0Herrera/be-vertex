@@ -51,6 +51,7 @@ No hay endpoint de alta, modificación ni baja de entidades. Esa administración
 - `GET /trx/all_by_client` — sólo el cliente autenticado.
 - `POST /trx/new` — acepta `received_date` opcional; si se omite usa la fecha actual de Argentina.
 - `POST /trx/multiple/new` — cada transacción acepta `received_date` opcional; si se omite usa la fecha actual de Argentina.
+- `POST /trx/{trx_id}/document-url` — devuelve una URL temporal para consultar el comprobante, si sigue disponible.
 - `GET /trx/get_movement`
 - `POST /trx/get_movements`
 - `GET /trx/get_owner_accounts`
@@ -73,5 +74,10 @@ No hay endpoint de alta, modificación ni baja de entidades. Esa administración
 - `GET /dashboard/summary`
 - `POST /extractorV2/extract` (Gemini)
 - `POST /extractorV2/aws-extract` (alias temporal compatible; también usa Gemini)
+- `POST /documents/upload-sessions` — prepara la carga directa y privada de comprobantes a S3.
+- `GET /documents/upload-sessions/{session_id}` — consulta el estado de una sesión propia.
+- `POST /documents/upload-sessions/{session_id}/refresh` — renueva formularios de carga vencidos.
+- `GET /documents/expired-summary` — admin/super; informa comprobantes que ya pueden eliminarse.
+- `POST /documents/delete-expired` — admin/super; eliminación manual de archivos vencidos.
 
 Swagger en desarrollo es la fuente exacta de parámetros y esquemas: `/docs`.

@@ -46,6 +46,16 @@ class ResponseSerializationService:
 
   @classmethod
   def transaction(cls, transaction):
+    document = transaction.document
+    if document is None:
+      document_status = "unavailable"
+    elif document.status == "active":
+      document_status = "available"
+    elif document.status == "deleted":
+      document_status = "deleted"
+    else:
+      document_status = "unavailable"
+
     return {
       "file_sha256": transaction.file_sha256,
       "receipt_fingerprint": transaction.receipt_fingerprint,
@@ -65,7 +75,10 @@ class ResponseSerializationService:
       "date": transaction.date,
       "received_date": transaction.received_date,
       "creation_date": transaction.creation_date,
+      "reconciled_at": transaction.reconciled_at,
       "status": transaction.status,
+      "document_status": document_status,
+      "document_delete_after": document.delete_after if document else None,
       "account_id": transaction.account_id,
       "applied_fee_percentage": transaction.applied_fee_percentage,
       "fee_amount": transaction.fee_amount,

@@ -28,6 +28,7 @@ from app.router import (
     gemini_extractor,
     logs,
     dashboard,
+    documents,
 )
 
 ENV = os.getenv("ENVIRONMENT", "dev")
@@ -45,7 +46,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
-    expose_headers=["Content-Disposition"],
+    expose_headers=["Content-Disposition", "X-Request-ID"],
 )
 
 create_tables()
@@ -62,3 +63,4 @@ app.include_router(currency.router)
 app.include_router(gemini_extractor.router)
 app.include_router(logs.router)
 app.include_router(dashboard.router)
+app.include_router(documents.router)

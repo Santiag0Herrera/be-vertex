@@ -32,6 +32,13 @@ class ReceiptIdentity:
     receipt_fingerprint: str
 
 
+@dataclass
+class MultipleTransactionBuild:
+    transactions: list[Trx]
+    transactions_by_client_document_id: dict[str, Trx]
+    duplicates: list[dict]
+
+
 logger = logging.getLogger("vertex.receipts")
 
 
@@ -143,6 +150,7 @@ class TransactionsService:
         result = duplicate_payload(duplicate, matched_by)
         result.update(
             {
+                "client_document_id": document_request.client_document_id,
                 "trx_id": document_request.trx_id,
                 "amount": document_request.amount,
                 "date": document_request.date,
@@ -173,6 +181,7 @@ class TransactionsService:
             .options(
                 joinedload(Trx.account).joinedload(CustomersBalance.client),
                 joinedload(Trx.account).joinedload(CustomersBalance.currency),
+                joinedload(Trx.document),
             )
             .join(CustomersBalance, Trx.account_id == CustomersBalance.id)
             .join(Clients, CustomersBalance.client_id == Clients.id)
@@ -334,7 +343,7 @@ class TransactionsService:
             ) from exc
         return self.success.response("Transaction registered!")
 
-    def create_multiple(self, multiple_trx_request: MultipleDocumentRequest):
+    def build_multiple(self, multiple_trx_request: MultipleDocumentRequest):
         account_model = self._get_scoped_account(multiple_trx_request.account_id)
         entity_model = (
             self.db.query(Entity)
@@ -366,6 +375,7 @@ class TransactionsService:
             self.error.raise_if_none(owner_account, "Owner account")
             receptor_account_number = owner_account.cbu.nro
         new_trx = []
+        transactions_by_client_document_id: dict[str, Trx] = {}
         duplicates = []
         seen_file_hashes: dict[str, str | None] = {}
         seen_receipt_fingerprints: dict[str, str | None] = {}
@@ -397,6 +407,7 @@ class TransactionsService:
                         "code": "duplicate_receipt",
                         "duplicate_of": duplicate_of,
                         "matched_by": matched_in_batch,
+                        "client_document_id": doc.client_document_id,
                         "trx_id": doc.trx_id,
                         "document_name": doc.document_name,
                         "amount": doc.amount,
@@ -447,13 +458,26 @@ class TransactionsService:
             )
             new_trx.append(trx_model)
             self.db.add(trx_model)
+            if doc.client_document_id is not None:
+                transactions_by_client_document_id[
+                    str(doc.client_document_id)
+                ] = trx_model
             if identity.file_sha256:
                 seen_file_hashes[identity.file_sha256] = identity.source_trx_id
             seen_receipt_fingerprints[
                 identity.receipt_fingerprint
             ] = identity.source_trx_id
 
+        self.db.flush()
+        return MultipleTransactionBuild(
+            transactions=new_trx,
+            transactions_by_client_document_id=transactions_by_client_document_id,
+            duplicates=duplicates,
+        )
+
+    def create_multiple(self, multiple_trx_request: MultipleDocumentRequest):
         try:
+            build = self.build_multiple(multiple_trx_request)
             self.db.commit()
         except IntegrityError as exc:
             self.db.rollback()
@@ -464,8 +488,15 @@ class TransactionsService:
                     "message": "A receipt was uploaded concurrently. Retry the request.",
                 },
             ) from exc
+        except Exception:
+            self.db.rollback()
+            raise
+
         return self.success.response(
-            {"created": len(new_trx), "duplicates": duplicates}
+            {
+                "created": len(build.transactions),
+                "duplicates": build.duplicates,
+            }
         )
 
     def get_all_by_client_id(
@@ -491,6 +522,7 @@ class TransactionsService:
             .options(
                 joinedload(Trx.account).joinedload(CustomersBalance.client),
                 joinedload(Trx.account).joinedload(CustomersBalance.currency),
+                joinedload(Trx.document),
             )
             .join(CustomersBalance, Trx.account_id == CustomersBalance.id)
             .filter(
