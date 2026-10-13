@@ -11,6 +11,7 @@ from app.services.extractor.gemini_client import (
     extract_document_fields,
 )
 from app.services.extractor.models import DocumentExtractResponse, ExtractedField
+from app.text_sanitization import remove_nul_characters
 from app.services.ReceiptIdentityService import (
     build_receipt_fingerprint,
     file_sha256,
@@ -110,7 +111,7 @@ def attach_document_identity(
     filename: str | None,
     content_sha256: str,
 ) -> DocumentExtractResponse:
-    document_name = filename or "unnamed"
+    document_name = remove_nul_characters(filename or "unnamed") or "unnamed"
     result.partial["document_name"] = document_name
     result.partial["file_sha256"] = content_sha256
     if result.document:

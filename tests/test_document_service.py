@@ -124,6 +124,19 @@ def _seed(db):
     return entity, user, client, account, request_user
 
 
+def test_upload_document_request_removes_nul_characters():
+    document = UploadDocumentRequest(
+        client_document_id=uuid4(),
+        original_name="comprobante\x00.pdf",
+        mime_type="application/\x00pdf",
+        size_bytes=100,
+        sha256="a" * 64,
+    )
+
+    assert document.original_name == "comprobante.pdf"
+    assert document.mime_type == "application/pdf"
+
+
 def test_upload_session_commits_document_and_is_idempotent():
     engine, db = _database()
     try:

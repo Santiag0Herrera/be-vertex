@@ -202,6 +202,28 @@ def test_receipt_without_optional_sender_data_can_be_created():
     db.close()
 
 
+def test_nul_characters_are_removed_before_transaction_persistence():
+    db, _, account, service = transaction_context()
+    document = complete_document()
+    # Simulate an unsafe value introduced after request validation.
+    document.document_name = "comprobante\x00.pdf"
+    document.trx_id = "OP-ABC\x00-123"
+    document.emisor_name = "Emisor\x00 S.A."
+    document.emisor_cuit = "20-1234\x005678-9"
+    document.receptor_cuit = "30-9876\x005432-1"
+
+    result = service.create_multiple(multiple_request(account.id, document))
+    transaction = db.query(Trx).one()
+
+    assert result["result"]["created"] == 1
+    assert transaction.document_name == "comprobante.pdf"
+    assert transaction.source_trx_id == "OP-ABC-123"
+    assert transaction.emisor_name == "Emisor S.A."
+    assert transaction.emisor_cuit == "20-12345678-9"
+    assert transaction.receptor_cuit == "30-98765432-1"
+    db.close()
+
+
 def test_duplicate_error_payload_is_json_serializable():
     db, entity, account, service = transaction_context()
     service.create_multiple(

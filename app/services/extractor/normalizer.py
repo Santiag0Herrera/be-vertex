@@ -3,6 +3,8 @@ from __future__ import annotations
 import re
 import unicodedata
 
+from app.text_sanitization import remove_nul_characters
+
 
 def normalize_key(key: str) -> str:
     if not key:
@@ -19,6 +21,6 @@ def normalize_key(key: str) -> str:
 
 
 def clean_value(value: str) -> str:
-    cleaned = str(value or "").strip()
+    cleaned = remove_nul_characters(str(value or "")).strip()
     cleaned = re.sub(r"\s+", " ", cleaned)
     return cleaned.strip(":- \t")

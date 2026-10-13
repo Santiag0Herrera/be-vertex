@@ -1,6 +1,7 @@
 import datetime
 import logging
 import re
+import uuid
 from dataclasses import dataclass
 from zoneinfo import ZoneInfo
 
@@ -13,7 +14,7 @@ from app.schemas.transactions import (
     DocumentRequest,
     MultipleDocumentRequest,
 )
-import uuid
+from app.text_sanitization import remove_nul_characters
 
 from .ErrorService import ErrorService
 from .SuccessService import SuccessService
@@ -125,16 +126,18 @@ class TransactionsService:
 
         return ReceiptIdentity(
             source_trx_id=(
-                str(document_request.trx_id).strip()
+                remove_nul_characters(str(document_request.trx_id)).strip()
                 if document_request.trx_id
                 else None
             ),
             file_sha256=(
-                str(document_request.file_sha256).strip().lower()
+                remove_nul_characters(str(document_request.file_sha256))
+                .strip()
+                .lower()
                 if document_request.file_sha256
                 else None
             ),
-            receipt_fingerprint=receipt_fingerprint,
+            receipt_fingerprint=remove_nul_characters(receipt_fingerprint),
         )
 
     def _find_duplicate(self, identity: ReceiptIdentity):
@@ -293,8 +296,8 @@ class TransactionsService:
         )
         self.error.raise_if_none(cbu_model)
 
-        internal_trx_id = (
-            document_request.trx_id or f"AUTO-{uuid.uuid4().hex[:16].upper()}"
+        internal_trx_id = identity.source_trx_id or (
+            f"AUTO-{uuid.uuid4().hex[:16].upper()}"
         )
         trx_exists_model = (
             self.db.query(Trx).filter(Trx.trx_id == internal_trx_id).first()
@@ -316,12 +319,12 @@ class TransactionsService:
             file_sha256=identity.file_sha256,
             receipt_fingerprint=identity.receipt_fingerprint,
             source_trx_id=identity.source_trx_id,
-            document_name=document_request.document_name,
-            emisor_cbu=document_request.emisor_cbu,
-            emisor_name=document_request.emisor_name,
-            emisor_cuit=document_request.emisor_cuit,
-            receptor_cuit=document_request.receptor_cuit,
-            receptor_cbu=cbu_model.nro,
+            document_name=remove_nul_characters(document_request.document_name),
+            emisor_cbu=remove_nul_characters(document_request.emisor_cbu),
+            emisor_name=remove_nul_characters(document_request.emisor_name),
+            emisor_cuit=remove_nul_characters(document_request.emisor_cuit),
+            receptor_cuit=remove_nul_characters(document_request.receptor_cuit),
+            receptor_cbu=remove_nul_characters(cbu_model.nro),
             entity_id=entity_model.id,
             client_id=account_model.client_id,
             amount=document_request.amount,
@@ -433,20 +436,22 @@ class TransactionsService:
                 )
                 continue
 
-            emisor_name = doc.emisor_name
-            emisor_cuit = doc.emisor_cuit
-            emisor_cbu = doc.emisor_cbu
+            emisor_name = remove_nul_characters(doc.emisor_name)
+            emisor_cuit = remove_nul_characters(doc.emisor_cuit)
+            emisor_cbu = remove_nul_characters(doc.emisor_cbu)
             internal_trx_id = f"AUTO-{uuid.uuid4().hex[:16].upper()}"
             trx_model = Trx(
                 file_sha256=identity.file_sha256,
                 receipt_fingerprint=identity.receipt_fingerprint,
                 source_trx_id=identity.source_trx_id,
-                document_name=doc.document_name or multiple_trx_request.document_name,
+                document_name=remove_nul_characters(
+                    doc.document_name or multiple_trx_request.document_name
+                ),
                 emisor_cbu=emisor_cbu,
                 emisor_name=emisor_name,
                 emisor_cuit=emisor_cuit,
-                receptor_cuit=doc.receptor_cuit,
-                receptor_cbu=receptor_account_number,
+                receptor_cuit=remove_nul_characters(doc.receptor_cuit),
+                receptor_cbu=remove_nul_characters(receptor_account_number),
                 entity_id=entity_model.id,
                 client_id=account_model.client_id,
                 amount=doc.amount,

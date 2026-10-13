@@ -4,6 +4,8 @@ from typing import Optional
 from uuid import UUID
 from zoneinfo import ZoneInfo
 
+from app.text_sanitization import remove_nul_characters
+
 
 BUSINESS_TIMEZONE = ZoneInfo("America/Argentina/Buenos_Aires")
 
@@ -26,6 +28,23 @@ class DocumentRequest(BaseModel):
     description="Date when the receipt was received from the client in YYYY-MM-DD format",
   )
   account_id: Optional[int] = None
+
+  @field_validator(
+    "document_name",
+    "file_sha256",
+    "receipt_fingerprint",
+    "trx_id",
+    "emisor_name",
+    "emisor_cuit",
+    "emisor_cbu",
+    "receptor_name",
+    "receptor_cuit",
+    "receptor_cbu",
+    mode="before",
+  )
+  @classmethod
+  def remove_database_unsafe_characters(cls, value):
+    return remove_nul_characters(value)
 
   @field_validator("date", mode="before")
   @classmethod
@@ -79,6 +98,11 @@ class MultipleDocumentRequest(BaseModel):
   account_id: int
   owner_account_number: str
   document_name: Optional[str] = None
+
+  @field_validator("owner_account_number", "document_name", mode="before")
+  @classmethod
+  def remove_database_unsafe_characters(cls, value):
+    return remove_nul_characters(value)
 
 class MovementsRequest(BaseModel):
   account_number: str

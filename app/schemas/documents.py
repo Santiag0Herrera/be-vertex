@@ -3,6 +3,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field, StringConstraints, field_validator
 
+from app.text_sanitization import remove_nul_characters
+
 
 Sha256Hex = Annotated[
     str,
@@ -17,17 +19,23 @@ class UploadDocumentRequest(BaseModel):
     size_bytes: int = Field(..., gt=0)
     sha256: Sha256Hex
 
-    @field_validator("original_name")
+    @field_validator("original_name", mode="before")
     @classmethod
     def normalize_original_name(cls, value: str) -> str:
+        value = remove_nul_characters(value)
+        if not isinstance(value, str):
+            return value
         normalized = value.replace("\\", "/").split("/")[-1].strip()
         if not normalized or normalized in {".", ".."}:
             raise ValueError("Invalid original file name")
         return normalized
 
-    @field_validator("mime_type")
+    @field_validator("mime_type", mode="before")
     @classmethod
     def normalize_mime_type(cls, value: str) -> str:
+        value = remove_nul_characters(value)
+        if not isinstance(value, str):
+            return value
         return value.strip().lower()
 
     @field_validator("sha256")

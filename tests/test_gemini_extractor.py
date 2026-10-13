@@ -95,6 +95,30 @@ async def test_extractor_accepts_receipt_without_optional_identity_fields(monkey
 
 
 @pytest.mark.asyncio
+async def test_extractor_removes_nul_characters_from_text_fields(monkeypatch):
+    extracted = complete_gemini_result()
+    extracted.trx_id = "1797\x0012727732"
+    extracted.emisor_name = "Emisor\x00 S.A."
+    monkeypatch.setattr(
+        service,
+        "extract_document_fields",
+        AsyncMock(return_value=extracted),
+    )
+
+    result = await service.extract_document_from_file(
+        upload_file(),
+        request_id="gemini-nul-character",
+    )
+
+    assert result.ok is True
+    assert result.document is not None
+    assert result.document.trx_id == "179712727732"
+    assert result.document.emisor_name == "Emisor S.A."
+    assert "\x00" not in result.partial["trx_id"]
+    assert "\x00" not in result.partial["emisor_name"]
+
+
+@pytest.mark.asyncio
 async def test_payment_required_is_returned_as_an_http_error(monkeypatch):
     monkeypatch.setattr(
         service,
