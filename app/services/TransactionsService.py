@@ -157,6 +157,11 @@ class TransactionsService:
         result = duplicate_payload(duplicate, matched_by)
         result.update(
             {
+                "receipt_number": (
+                    document_request.trx_id
+                    or duplicate.source_trx_id
+                    or duplicate.trx_id
+                ),
                 "client_document_id": document_request.client_document_id,
                 "trx_id": document_request.trx_id,
                 "amount": document_request.amount,
@@ -415,6 +420,7 @@ class TransactionsService:
                 duplicates.append(
                     {
                         "code": "duplicate_receipt",
+                        "receipt_number": doc.trx_id,
                         "duplicate_of": duplicate_of,
                         "matched_by": matched_in_batch,
                         "client_document_id": doc.client_document_id,

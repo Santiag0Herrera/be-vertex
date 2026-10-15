@@ -138,6 +138,7 @@ def duplicate_payload(duplicate: Trx, matched_by: list[str]) -> dict:
     duplicate_date = duplicate.date
     return {
         "code": "duplicate_receipt",
+        "receipt_number": duplicate.source_trx_id or duplicate.trx_id,
         "duplicate_of": duplicate.source_trx_id or duplicate.trx_id,
         "duplicate_internal_id": duplicate.trx_id,
         "matched_by": matched_by,

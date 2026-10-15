@@ -191,6 +191,7 @@ def test_duplicate_inside_one_batch_is_not_created_twice():
     assert result["result"]["duplicates"][0]["matched_by"] == [
         "receipt_fingerprint"
     ]
+    assert result["result"]["duplicates"][0]["receipt_number"] == "OP-ABC-123"
     assert db.query(Trx).count() == 1
     db.close()
 
@@ -271,5 +272,6 @@ def test_duplicate_error_payload_is_json_serializable():
 
     payload = duplicate_payload(duplicate, ["file_sha256"])
 
+    assert payload["receipt_number"] == "OP-ABC-123"
     assert json.loads(json.dumps(payload))["date"].startswith("2026-10-06")
     db.close()
