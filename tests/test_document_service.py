@@ -219,6 +219,7 @@ def test_duplicate_receipt_does_not_leave_a_persisted_document():
                             client_document_id=client_document_id,
                             document_name="comprobante.pdf",
                             file_sha256=file_sha256,
+                            trx_id="OP-DUPLICATE-001",
                             amount=100,
                             date=datetime.datetime(2026, 10, 5, 10, 30),
                         )

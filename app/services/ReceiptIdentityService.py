@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
+import unicodedata
 from datetime import date, datetime, time
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from typing import Any
@@ -26,6 +28,11 @@ def _value(document: Any, field: str):
     if isinstance(document, dict):
         return document.get(field)
     return getattr(document, field, None)
+
+
+def _normalize_identifier(value: Any) -> str:
+    normalized = unicodedata.normalize("NFKC", str(value or "")).upper()
+    return re.sub(r"[^0-9A-Z]", "", normalized)
 
 
 def _normalize_datetime(value: Any) -> str:
@@ -64,15 +71,20 @@ def missing_receipt_identity_fields(document: Any) -> list[str]:
     return missing
 
 
-def build_receipt_fingerprint(document: Any) -> str:
+def build_receipt_fingerprint(document: Any) -> str | None:
     missing = missing_receipt_identity_fields(document)
     if missing:
         raise ValueError(
             "Missing required receipt identity fields: " + ", ".join(missing)
         )
 
+    operation_id = _normalize_identifier(_value(document, "trx_id"))
+    if len(operation_id) < 4:
+        return None
+
     payload = {
-        "version": 2,
+        "version": 3,
+        "operation_id": operation_id,
         "amount_cents": _amount_in_cents(_value(document, "amount")),
         "transaction_datetime": _normalize_datetime(_value(document, "date")),
     }

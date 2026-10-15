@@ -90,10 +90,9 @@ def test_semantic_fingerprint_survives_formatting_changes():
     assert build_receipt_fingerprint(first) == build_receipt_fingerprint(second)
 
 
-def test_semantic_fingerprint_ignores_optional_operation_and_sender_data():
+def test_semantic_fingerprint_ignores_optional_sender_data():
     first = complete_document()
     second = complete_document(
-        trx_id=None,
         emisor_name=None,
         emisor_cuit=None,
         receptor_name=None,
@@ -101,6 +100,19 @@ def test_semantic_fingerprint_ignores_optional_operation_and_sender_data():
     )
 
     assert build_receipt_fingerprint(first) == build_receipt_fingerprint(second)
+
+
+def test_semantic_fingerprint_changes_for_a_different_operation():
+    first = complete_document()
+    second = complete_document(trx_id="OP-ABC-124")
+
+    assert build_receipt_fingerprint(first) != build_receipt_fingerprint(second)
+
+
+def test_semantic_fingerprint_is_omitted_without_an_operation_id():
+    document = complete_document(trx_id=None)
+
+    assert build_receipt_fingerprint(document) is None
 
 
 def test_semantic_fingerprint_changes_for_a_different_time():
@@ -183,6 +195,32 @@ def test_duplicate_inside_one_batch_is_not_created_twice():
     db.close()
 
 
+def test_same_amount_and_time_with_different_operations_are_both_created():
+    db, _, account, service = transaction_context()
+    first = complete_document(trx_id="OP-FIRST", file_sha256="1" * 64)
+    second = complete_document(trx_id="OP-SECOND", file_sha256="2" * 64)
+
+    result = service.create_multiple(multiple_request(account.id, first, second))
+
+    assert result["result"]["created"] == 2
+    assert result["result"]["duplicates"] == []
+    assert db.query(Trx).count() == 2
+    db.close()
+
+
+def test_same_amount_and_time_without_operations_are_both_created():
+    db, _, account, service = transaction_context()
+    first = complete_document(trx_id=None, file_sha256="3" * 64)
+    second = complete_document(trx_id=None, file_sha256="4" * 64)
+
+    result = service.create_multiple(multiple_request(account.id, first, second))
+
+    assert result["result"]["created"] == 2
+    assert result["result"]["duplicates"] == []
+    assert db.query(Trx).count() == 2
+    db.close()
+
+
 def test_receipt_without_optional_sender_data_can_be_created():
     db, _, account, service = transaction_context()
     minimal = DocumentRequest(
@@ -198,7 +236,7 @@ def test_receipt_without_optional_sender_data_can_be_created():
     assert transaction.emisor_name is None
     assert transaction.emisor_cuit is None
     assert transaction.emisor_cbu is None
-    assert transaction.receipt_fingerprint
+    assert transaction.receipt_fingerprint is None
     db.close()
 
 

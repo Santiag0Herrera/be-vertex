@@ -90,7 +90,7 @@ async def test_extractor_accepts_receipt_without_optional_identity_fields(monkey
     assert result.document.date == datetime(2026, 9, 18, 15, 54)
     assert result.document.trx_id is None
     assert result.document.emisor_cuit is None
-    assert result.document.receipt_fingerprint
+    assert result.document.receipt_fingerprint is None
     assert result.missing == []
 
 

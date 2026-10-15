@@ -119,7 +119,8 @@ def attach_document_identity(
         result.document.file_sha256 = content_sha256
         receipt_fingerprint = build_receipt_fingerprint(result.document)
         result.document.receipt_fingerprint = receipt_fingerprint
-        result.partial["receipt_fingerprint"] = receipt_fingerprint
+        if receipt_fingerprint:
+            result.partial["receipt_fingerprint"] = receipt_fingerprint
     return result
 
 

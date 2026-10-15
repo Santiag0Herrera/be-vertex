@@ -30,7 +30,7 @@ from .ReceiptIdentityService import (
 class ReceiptIdentity:
     source_trx_id: str | None
     file_sha256: str | None
-    receipt_fingerprint: str
+    receipt_fingerprint: str | None
 
 
 @dataclass
@@ -137,7 +137,11 @@ class TransactionsService:
                 if document_request.file_sha256
                 else None
             ),
-            receipt_fingerprint=remove_nul_characters(receipt_fingerprint),
+            receipt_fingerprint=(
+                remove_nul_characters(receipt_fingerprint)
+                if receipt_fingerprint
+                else None
+            ),
         )
 
     def _find_duplicate(self, identity: ReceiptIdentity):
@@ -389,7 +393,10 @@ class TransactionsService:
             if identity.file_sha256 and identity.file_sha256 in seen_file_hashes:
                 matched_in_batch.append("file_sha256")
                 duplicate_of = seen_file_hashes[identity.file_sha256]
-            if identity.receipt_fingerprint in seen_receipt_fingerprints:
+            if (
+                identity.receipt_fingerprint
+                and identity.receipt_fingerprint in seen_receipt_fingerprints
+            ):
                 matched_in_batch.append("receipt_fingerprint")
                 duplicate_of = seen_receipt_fingerprints[
                     identity.receipt_fingerprint
@@ -469,9 +476,10 @@ class TransactionsService:
                 ] = trx_model
             if identity.file_sha256:
                 seen_file_hashes[identity.file_sha256] = identity.source_trx_id
-            seen_receipt_fingerprints[
-                identity.receipt_fingerprint
-            ] = identity.source_trx_id
+            if identity.receipt_fingerprint:
+                seen_receipt_fingerprints[
+                    identity.receipt_fingerprint
+                ] = identity.source_trx_id
 
         self.db.flush()
         return MultipleTransactionBuild(
