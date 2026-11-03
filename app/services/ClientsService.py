@@ -7,6 +7,7 @@ from .ErrorService import ErrorService
 from .SuccessService import SuccessService
 from app.schemas.auth import ReqUser
 from app.schemas.clients import ClientResponse, NewClientRequest, UpdateClientRequest
+from app.schemas.users import ChangePasswordRequest
 from app.services.auth_service import bcrypt_context
 
 class ClientService():
@@ -101,7 +102,7 @@ class ClientService():
     self.db.add(client_model)
     self.db.commit()
     return self.success.response("Cliente actualizado exitosamente.")
-  
+
 
   def delete(self, id_client: int):
     """
@@ -178,3 +179,27 @@ class ClientService():
             ]
         }
     })
+
+
+  def change_own_password(self, change_password_request: ChangePasswordRequest):
+    client_model = self.db.query(Clients).filter(
+      Clients.id == self.req_user.get("id"),
+      Clients.entity_id == self.req_user.get("entity_id"),
+      Clients.enabled == True
+    ).first()
+
+    if client_model is None:
+      self.error.raise_not_found("Cliente")
+
+    if not bcrypt_context.verify(
+      change_password_request.password,
+      client_model.hashed_password
+    ):
+      self.error.raise_bad_request("La contraseña actual es incorrecta.")
+
+    client_model.hashed_password = bcrypt_context.hash(
+      change_password_request.new_password
+    )
+    self.db.add(client_model)
+    self.db.commit()
+    return self.success.response("Contraseña actualizada exitosamente.")

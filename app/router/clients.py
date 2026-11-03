@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends
 from app.db.database import get_db
 from starlette import status
 from app.schemas.clients import NewClientRequest, UpdateClientRequest
+from app.schemas.users import ChangePasswordRequest
 from app.services.auth_service import require_admin_user, require_client, require_internal_user
 from app.services.DBService import DBService 
 
@@ -58,3 +59,13 @@ async def get_client_by_id(db: db_dependency, user: client_dependency):
   db_service = DBService(db=db, req_user=user)
   get_client_model = db_service.client.get_current()
   return get_client_model
+
+
+@router.put("/me/changePassword", status_code=status.HTTP_200_OK)
+async def change_current_client_password(
+  db: db_dependency,
+  user: client_dependency,
+  change_password_request: ChangePasswordRequest
+):
+  db_service = DBService(db=db, req_user=user)
+  return db_service.client.change_own_password(change_password_request)
