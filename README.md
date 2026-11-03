@@ -61,7 +61,21 @@ CREATE INDEX IF NOT EXISTS idx_customers_balance_client_id
 Authorization: Bearer <token>
 ```
 
-El middleware valida firma, vencimiento y claims mínimos. Las dependencias de cada ruta aplican el tipo de cuenta y rol requerido (`client`, usuario interno o `admin/super`). Además, en cada request se vuelve a consultar la cuenta, su permiso y la entidad; deshabilitar una cuenta, cambiarle el permiso o deshabilitar la entidad invalida efectivamente los tokens emitidos.
+Antes de validar credenciales, el middleware exige que cada request resuelva una
+ruta registrada en la tabla `endpoints`. Las rutas públicas también deben estar
+registradas y se identifican mediante `perm_id = NULL`. Una ruta ausente se
+rechaza con HTTP 403. Las rutas parametrizadas se registran por su template, por
+ejemplo `/entities/{entity_id}`.
+
+El catálogo inicial y la asociación de permisos se encuentran en
+`migrations/20261102_enforce_endpoint_registry.sql`, que debe ejecutarse antes
+de desplegar esta versión del backend.
+
+Luego, el middleware valida firma, vencimiento, claims, producto y jerarquía
+contra los permisos actuales de la base de datos. Las dependencias de cada ruta
+aplican además el tipo de cuenta y rol requerido (`client`, usuario interno o
+`admin/super`). Deshabilitar una cuenta, cambiarle el permiso o deshabilitar la
+entidad invalida efectivamente los tokens emitidos.
 
 Las consultas y mutaciones por identificador están limitadas a `entity_id`. Un cliente queda limitado también a su propio `client_id` y sus cuentas.
 

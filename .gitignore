@@ -15,6 +15,7 @@ dev.env
 
 *.sql
 !migrations/20261005_transaction_documents.sql
+!migrations/20261102_enforce_endpoint_registry.sql
 compose.yaml
 
 # FastAPI specific

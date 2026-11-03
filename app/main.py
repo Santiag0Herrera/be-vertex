@@ -38,8 +38,6 @@ app = FastAPI(
     openapi_url="/openapi.json" if ENV == "dev" else None,
 )
 
-app.add_middleware(PermissionMiddleware)
-app.add_middleware(RequestLoggingMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[os.getenv("ALLOW_ORIGINS")],
@@ -48,6 +46,10 @@ app.add_middleware(
     allow_headers=["*"],
     expose_headers=["Content-Disposition", "X-Request-ID"],
 )
+app.add_middleware(RequestLoggingMiddleware)
+# Added last so every request, including CORS preflight, is checked against
+# the database endpoint registry before another middleware can short-circuit it.
+app.add_middleware(PermissionMiddleware)
 
 create_tables()
 app.include_router(auth.router)
