@@ -1,12 +1,16 @@
 from decimal import Decimal
 from .ErrorService import ErrorService
 from .SuccessService import SuccessService
-from sqlalchemy import Float, func, literal, select, union_all
+from sqlalchemy import Float, Integer, String, case, cast, func, literal, select, union_all
 from sqlalchemy.orm import Session
-from app.models import CustomersBalance, Clients, Currency, FeeWithdrawals, Payments, Trx, Users
+from app.models import AccountAdjustments, CustomersBalance, Clients, Currency, FeeWithdrawals, Payments, Trx, Users
 from sqlalchemy.orm import joinedload
 from app.schemas.customerBalance import CustomerBalanceCreateRequest, FeeWithdrawalRequest
 from app.services.ResponseSerializationService import ResponseSerializationService
+
+NOTE_TYPES = {"credito": "Nota de credito", "debito": "Nota de debito"}
+NOTE_PREFIX = {"credito": "NC", "debito": "ND"}
+
 
 class CustomerBalanceService:
   def __init__(self, db: Session, req_user: dict):
@@ -145,6 +149,16 @@ class CustomerBalanceService:
     })
 
 
+  @staticmethod
+  def _note_fields(note_type, note_id, number, reason):
+    return {
+      "note_id": note_id,
+      "note_type": note_type,
+      "note_label": f"{NOTE_PREFIX[note_type]}-{number:04d}",
+      "reason": reason,
+    }
+
+
   def _require_client(self):
     if self.req_user.get("account_type") != "client":
       self.error.raise_forbidden("Este endpoint es exclusivo para clientes.")
@@ -218,6 +232,8 @@ class CustomerBalanceService:
       Trx.status.label("status"),
       Trx.id.label("movement_id"),
       literal(1).label("source_order"),
+      literal(None, type_=Integer).label("note_number"),
+      literal(None, type_=String).label("note_reason"),
     ).where(
       Trx.account_id == balance_model.id,
       Trx.status == "conciliado",
@@ -231,6 +247,8 @@ class CustomerBalanceService:
       Payments.status.label("status"),
       Payments.id.label("movement_id"),
       literal(2).label("source_order"),
+      literal(None, type_=Integer).label("note_number"),
+      literal(None, type_=String).label("note_reason"),
     ).where(Payments.customer_balance_id == balance_model.id)
     withdrawal_movements = select(
       literal("Retiro de comision").label("type"),
@@ -241,12 +259,30 @@ class CustomerBalanceService:
       FeeWithdrawals.status.label("status"),
       FeeWithdrawals.id.label("movement_id"),
       literal(3).label("source_order"),
+      literal(None, type_=Integer).label("note_number"),
+      literal(None, type_=String).label("note_reason"),
     ).where(FeeWithdrawals.customer_balance_id == balance_model.id)
+    adjustment_movements = select(
+      case(
+        (AccountAdjustments.type == "credito", literal(NOTE_TYPES["credito"])),
+        else_=literal(NOTE_TYPES["debito"]),
+      ).label("type"),
+      cast(AccountAdjustments.amount, Float).label("amount"),
+      literal(None, type_=Float).label("fee_amount"),
+      literal(None, type_=Float).label("net_amount"),
+      AccountAdjustments.date.label("date"),
+      AccountAdjustments.status.label("status"),
+      AccountAdjustments.id.label("movement_id"),
+      literal(4).label("source_order"),
+      AccountAdjustments.number.label("note_number"),
+      AccountAdjustments.reason.label("note_reason"),
+    ).where(AccountAdjustments.customer_balance_id == balance_model.id)
 
     movements_query = union_all(
       transaction_movements,
       payment_movements,
       withdrawal_movements,
+      adjustment_movements,
     ).subquery()
     total_records = self.db.execute(
       select(func.count()).select_from(movements_query)
@@ -273,6 +309,11 @@ class CustomerBalanceService:
       if row["type"] == "Transaccion":
         movement["fee_amount"] = row["fee_amount"]
         movement["net_amount"] = row["net_amount"]
+      if row["type"] in NOTE_TYPES.values():
+        movement.update(self._note_fields(
+          "credito" if row["type"] == NOTE_TYPES["credito"] else "debito",
+          row["movement_id"], row["note_number"], row["note_reason"],
+        ))
       movements.append(movement)
 
     return {
@@ -332,6 +373,11 @@ class CustomerBalanceService:
       .filter(FeeWithdrawals.customer_balance_id == balance_model.id)
       .all()
     )
+    adjustments = (
+      self.db.query(AccountAdjustments)
+      .filter(AccountAdjustments.customer_balance_id == balance_model.id)
+      .all()
+    )
     # Combinar ambos en un solo resultado (opcional: los podés ordenar por fecha después)
     combined = []
     for trx in trxs:
@@ -356,6 +402,14 @@ class CustomerBalanceService:
         "amount": f"{balance_model.currency.name} {withdrawal.amount}",
         "date": withdrawal.date,
         "status": withdrawal.status
+      })
+    for adjustment in adjustments:
+      combined.append({
+        "type": NOTE_TYPES[adjustment.type],
+        "amount": f"{balance_model.currency.name} {float(adjustment.amount)}",
+        "date": adjustment.date,
+        "status": adjustment.status,
+        **self._note_fields(adjustment.type, adjustment.id, adjustment.number, adjustment.reason),
       })
     # Ordenar por fecha descendente
     combined.sort(key=lambda x: str(x["date"]), reverse=True)

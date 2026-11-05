@@ -360,3 +360,39 @@ class PaymentOrders(Base):
     status = Column(String, nullable=False, default="pendiente_aprobacion")
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     updated_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+
+class AccountAdjustments(Base):
+    """Notas de crédito (suman saldo) y débito (restan saldo) internas."""
+    __tablename__ = "account_adjustments"
+    __table_args__ = (
+        CheckConstraint("amount > 0", name="account_adjustment_positive_amount"),
+        CheckConstraint("type IN ('credito', 'debito')", name="account_adjustment_type"),
+        CheckConstraint("status IN ('emitida', 'anulada')", name="account_adjustment_status"),
+        UniqueConstraint("entity_id", "type", "number", name="uq_account_adjustments_entity_type_number"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    entity_id = Column(Integer, ForeignKey("entities.id"), nullable=False, index=True)
+    client_id = Column(Integer, ForeignKey("clients.id"), nullable=False)
+    customer_balance_id = Column(Integer, ForeignKey("customers_balance.id"), nullable=False, index=True)
+    currency_id = Column(Integer, ForeignKey("currency.id"), nullable=False)
+    type = Column(String(10), nullable=False)
+    number = Column(Integer, nullable=False)
+    amount = Column(Numeric(14, 2), nullable=False)
+    reason = Column(Text, nullable=False)
+    reference = Column(String(100), nullable=True)
+    date = Column(DateTime, nullable=False, default=datetime.utcnow)
+    balance_before = Column(Numeric(14, 2), nullable=False)
+    balance_after = Column(Numeric(14, 2), nullable=False)
+    status = Column(String(10), nullable=False, default="emitida")
+    created_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    annulled_at = Column(DateTime, nullable=True)
+    annulled_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    annul_reason = Column(Text, nullable=True)
+
+    customer_balance = relationship("CustomersBalance")
+    currency = relationship("Currency")
+    created_by_user = relationship("Users", foreign_keys=[created_by_user_id])
+    annulled_by_user = relationship("Users", foreign_keys=[annulled_by_user_id])

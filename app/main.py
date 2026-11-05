@@ -29,6 +29,7 @@ from app.router import (
     logs,
     dashboard,
     documents,
+    adjustments,
 )
 
 ENV = os.getenv("ENVIRONMENT", "dev")
@@ -66,3 +67,4 @@ app.include_router(gemini_extractor.router)
 app.include_router(logs.router)
 app.include_router(dashboard.router)
 app.include_router(documents.router)
+app.include_router(adjustments.router)
