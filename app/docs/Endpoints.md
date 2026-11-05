@@ -2,13 +2,15 @@
 
 Salvo `POST /auth/token`, todas las rutas requieren un JWT. Las respuestas de negocio usan `{"status":"ok","result":...}`.
 
+Cada ruta debe estar registrada en la tabla `endpoints` por su template (por ejemplo `/entities/{entity_id}`); de lo contrario responde HTTP 403. Ver [PermissionMiddleware.md](PermissionMiddleware.md).
+
 ## Autenticación
 
 - `POST /auth/token`: login por email o CUIT.
 
 ## Usuarios internos
 
-- `GET /users/all`
+- `GET /users/all` — admin/super.
 - `GET /users/me`
 - `PUT /users/me`
 - `PUT /users/me/changePassword`
@@ -18,11 +20,12 @@ Salvo `POST /auth/token`, todas las rutas requieren un JWT. Las respuestas de ne
 
 ## Clientes
 
-- `GET /clients/all`
+- `GET /clients/all` — usuarios internos.
 - `POST /clients/create` — admin/super.
 - `PUT /clients/update?client_id={id}` — admin/super.
 - `DELETE /clients/delete?client_id={id}` — admin/super.
 - `GET /clients/me` — cliente autenticado.
+- `PUT /clients/me/changePassword` — cliente autenticado.
 
 ## Entidades
 
@@ -45,7 +48,7 @@ No hay endpoint de alta, modificación ni baja de entidades. Esa administración
 
 ## Transacciones y conciliación
 
-- `POST /trx/reconcile-pending`
+- `POST /trx/reconcile-pending` — usuarios internos; ejecuta la conciliación de la entidad. Responde 409 si ya hay una en curso. Ver [Conciliacion.md](Conciliacion.md).
 - `GET /trx/all`
 - `GET /trx/report.csv` — reporte CSV para usuarios internos; admite `month`, `date_from`, `date_to` (sobre la fecha de recepción del cliente), `status`, `client_id` y múltiples `account_ids`.
 - `GET /trx/all_by_client` — sólo el cliente autenticado.
@@ -71,8 +74,8 @@ No hay endpoint de alta, modificación ni baja de entidades. Esa administración
 - `GET /products/all`
 - `GET /currency/all`
 - `GET /logs/all` — admin/super y limitado a actores de su entidad.
-- `GET /dashboard/summary`
-- `POST /extractorV2/extract` (Gemini)
+- `GET /dashboard/summary` — usuarios internos.
+- `POST /extractorV2/extract` — extrae los datos del comprobante con Gemini; responde 409 si el comprobante ya fue cargado.
 - `POST /extractorV2/aws-extract` (alias temporal compatible; también usa Gemini)
 - `POST /documents/upload-sessions` — prepara la carga directa y privada de comprobantes a S3.
 - `GET /documents/upload-sessions/{session_id}` — consulta el estado de una sesión propia.
