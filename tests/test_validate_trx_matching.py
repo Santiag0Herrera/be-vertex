@@ -85,12 +85,11 @@ def test_indistinguishable_movements_provide_one_stable_slot_each(monkeypatch):
         account_number="123456",
     )
 
+    # Movements without a known sender only prove the amount arrived, not who
+    # sent it, so an extra receipt stays pending instead of becoming repetido.
     excess_result = _match("PENDING-11", movements)
 
-    assert excess_result["duplicated_trx"] is not None
-    assert excess_result["fingerprint_slot"] == 10
-    assert excess_result["fingerprint_total_slots"] == 10
-    assert excess_result["document_fingerprint"] == allocated_fingerprints[-1]
+    assert excess_result is None
 
 
 def test_repeated_api_row_with_bank_reference_does_not_add_capacity(monkeypatch):
@@ -118,9 +117,7 @@ def test_repeated_api_row_with_bank_reference_does_not_add_capacity(monkeypatch)
     lookup_calls.clear()
     second_result = _match("PENDING-2", movements)
 
-    assert second_result["duplicated_trx"] is not None
-    assert second_result["fingerprint_slot"] == 1
-    assert second_result["fingerprint_total_slots"] == 1
+    assert second_result is None
     assert len(lookup_calls) == 1
 
 

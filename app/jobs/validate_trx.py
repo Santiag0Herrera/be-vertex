@@ -35,6 +35,7 @@ SQL = """
 SELECT
   trx.trx_id AS trx_id,
   trx.emisor_cbu AS trx_emisor_cbu,
+  trx.emisor_cuit AS trx_emisor_cuit,
   trx.receptor_cbu AS trx_receptor_cbu,
   trx.amount AS trx_amount,
   trx.date AS trx_date,
@@ -357,6 +358,40 @@ def has_strong_movement_identifier(movement):
     return False
 
 
+CUIT_PREFIXES = {"20", "23", "24", "25", "26", "27", "30", "33", "34"}
+CUIT_CHECK_WEIGHTS = (5, 4, 3, 2, 7, 6, 5, 4, 3, 2)
+
+
+def normalize_cuit(value):
+    """Return the 11 CUIT digits, or None when the value is not CUIT-shaped."""
+    digits = re.sub(r"\D", "", str(value or ""))
+    return digits if len(digits) == 11 else None
+
+
+def is_valid_cuit(cuit):
+    if not cuit or len(cuit) != 11 or not cuit.isdigit():
+        return False
+    if cuit[:2] not in CUIT_PREFIXES:
+        return False
+    remainder = sum(
+        int(digit) * weight for digit, weight in zip(cuit, CUIT_CHECK_WEIGHTS)
+    ) % 11
+    check_digit = {0: 0, 1: 9}.get(remainder, 11 - remainder)
+    return check_digit == int(cuit[10])
+
+
+def movement_sender_cuit(movement):
+    """Return the sender CUIT Interbanking embeds in the movement, if any.
+
+    Interbanking leaves customer_cuit empty, but Banelco transfers carry the
+    sender's CUIT in voucher_number. Other credits (COELSA transfers, card
+    coupons) use constant or placeholder vouchers that never pass the CUIT
+    check digit, so they stay unidentified.
+    """
+    cuit = normalize_cuit(movement.get("voucher_number"))
+    return cuit if is_valid_cuit(cuit) else None
+
+
 def build_fingerprint_slot(base_fingerprint, slot_number):
     """Build a stable identity for one of several indistinguishable movements.
 
@@ -445,11 +480,24 @@ def match_trx_with_ib(
     account_number,
     valid_movement_dates=None,
     used_fingerprints=None,
+    allow_unidentified=True,
 ):
+    """Pick the bank movement that backs a pending receipt.
+
+    Movements whose sender CUIT is known (Banelco transfers) can only back a
+    receipt from that same CUIT, so a receipt can no longer take another
+    person's money just because amount and date coincide. Movements without a
+    known sender are matched by amount and date, and only when
+    ``allow_unidentified`` is true, so callers can let every receipt claim its
+    own identified movement before anyone falls back to the shared pool.
+
+    Returns an available match, a used identified match (a real duplicate), or
+    None when nothing backs the receipt yet (it stays pending).
+    """
     trx_amount = normalize_amount(trx["trx_amount"])
     trx_date = trx["trx_date"].date()
+    trx_cuit = normalize_cuit(trx.get("trx_emisor_cuit"))
     valid_movement_dates = set(valid_movement_dates or [trx_date])
-    duplicated_match = None
     matching_movements = []
 
     for mov in ib_movements:
@@ -486,9 +534,13 @@ def match_trx_with_ib(
                     "movement": mov,
                     "base_fingerprint": base_fingerprint,
                     "has_strong_identifier": has_strong_movement_identifier(mov),
+                    "sender_cuit": movement_sender_cuit(mov),
                 }
             )
 
+    # Slots are assigned over every amount/date candidate, before filtering by
+    # sender, so a movement keeps the same fingerprint no matter which receipt
+    # is looking at it.
     ambiguous_totals = Counter(
         candidate["base_fingerprint"]
         for candidate in matching_movements
@@ -496,9 +548,9 @@ def match_trx_with_ib(
     )
     ambiguous_occurrences = defaultdict(int)
     seen_strong_fingerprints = set()
+    slotted_candidates = []
 
     for candidate in matching_movements:
-        mov = candidate["movement"]
         base_fingerprint = candidate["base_fingerprint"]
 
         if candidate["has_strong_identifier"]:
@@ -514,10 +566,42 @@ def match_trx_with_ib(
             slot_number = ambiguous_occurrences[base_fingerprint]
             total_slots = ambiguous_totals[base_fingerprint]
 
-        document_fingerprint = build_fingerprint_slot(
-            base_fingerprint,
-            slot_number,
+        slotted_candidates.append(
+            {
+                **candidate,
+                "document_fingerprint": build_fingerprint_slot(
+                    base_fingerprint,
+                    slot_number,
+                ),
+                "fingerprint_slot": slot_number,
+                "fingerprint_total_slots": total_slots,
+            }
         )
+
+    identified = [
+        candidate
+        for candidate in slotted_candidates
+        if trx_cuit and candidate["sender_cuit"] == trx_cuit
+    ]
+    unidentified = [
+        candidate
+        for candidate in slotted_candidates
+        if candidate["sender_cuit"] is None
+    ]
+    ordered_candidates = [(candidate, "sender_cuit") for candidate in identified]
+    if allow_unidentified:
+        ordered_candidates.extend(
+            (candidate, "amount_date") for candidate in unidentified
+        )
+
+    duplicated_identified_match = None
+
+    for candidate, matched_by in ordered_candidates:
+        mov = candidate["movement"]
+        document_fingerprint = candidate["document_fingerprint"]
+        slot_number = candidate["fingerprint_slot"]
+        total_slots = candidate["fingerprint_total_slots"]
+
         if used_fingerprints is None:
             duplicated_trx = find_trx_by_fingerprint(
                 document_fingerprint=document_fingerprint,
@@ -531,37 +615,38 @@ def match_trx_with_ib(
             "duplicated_trx": duplicated_trx,
             "fingerprint_slot": slot_number,
             "fingerprint_total_slots": total_slots,
+            "matched_by": matched_by,
         }
 
         if duplicated_trx:
             logger.info(
-                "[IB MATCH USED] trx_id=%s duplicate_of=%s fingerprint=%s slot=%s/%s voucher_number=%s customer_cuit=%s",
+                "[IB MATCH USED] trx_id=%s duplicate_of=%s fingerprint=%s slot=%s/%s matched_by=%s voucher_number=%s",
                 trx["trx_id"],
                 duplicated_trx.get("trx_id"),
                 document_fingerprint,
                 slot_number,
                 total_slots,
+                matched_by,
                 mov.get("voucher_number"),
-                mov.get("customer_cuit"),
             )
-            # Keep the last occupied slot so an exhausted group is reported as
-            # N/N instead of looking like it failed at its first occurrence.
-            duplicated_match = matched_result
+            if matched_by == "sender_cuit":
+                duplicated_identified_match = matched_result
             continue
 
         logger.info(
-            "[IB MATCH AVAILABLE] trx_id=%s fingerprint=%s slot=%s/%s",
+            "[IB MATCH AVAILABLE] trx_id=%s fingerprint=%s slot=%s/%s matched_by=%s",
             trx["trx_id"],
             document_fingerprint,
             slot_number,
             total_slots,
+            matched_by,
         )
         return matched_result
 
-    if duplicated_match:
-        return duplicated_match
-
-    return None
+    # Only a movement that provably belongs to this sender makes the receipt a
+    # duplicate. An exhausted pool of unidentified movements just means its
+    # transfer has not been seen yet, so the receipt stays pending.
+    return duplicated_identified_match
 
 
 def update_trx_status(
@@ -941,6 +1026,7 @@ async def _run_reconciliation(entity_id=None) -> dict:
         movement_cache_hits,
     )
 
+    fetched_groups = []
     for group_key, entries in reconciliation_groups.items():
         bank_number, account_number, date_since, date_until = group_key
         checked_trx_count += len(entries)
@@ -983,110 +1069,130 @@ async def _run_reconciliation(entity_id=None) -> dict:
             len(entries),
         )
 
-        for entry in entries:
-            trx = entry["trx"]
-            trx_id = trx["trx_id"]
-            trx_date = trx["trx_date"].date()
-            trx_amount = trx["trx_amount"]
+        fetched_groups.append(
+            (bank_number, account_number, entries, movement_index)
+        )
 
-            try:
-                candidate_movements = select_credit_movements(
-                    movement_index,
-                    trx_amount,
-                    entry["valid_movement_dates"],
-                )
-                matched_result = match_trx_with_ib(
-                    trx,
-                    candidate_movements,
-                    bank_number=bank_number,
-                    account_number=account_number,
-                    valid_movement_dates=entry["valid_movement_dates"],
-                    used_fingerprints=used_fingerprints,
-                )
+    # Two passes: first every receipt may only claim the movement that carries
+    # its own sender CUIT; only then do the remaining receipts compete for
+    # movements without a known sender, by amount and date.
+    resolved_trx_ids = set()
+    for allow_unidentified in (False, True):
+        for bank_number, account_number, entries, movement_index in fetched_groups:
+            for entry in entries:
+                trx = entry["trx"]
+                trx_id = trx["trx_id"]
+                if trx_id in resolved_trx_ids:
+                    continue
+                trx_date = trx["trx_date"].date()
+                trx_amount = trx["trx_amount"]
 
-                if not matched_result:
+                try:
+                    candidate_movements = select_credit_movements(
+                        movement_index,
+                        trx_amount,
+                        entry["valid_movement_dates"],
+                    )
+                    matched_result = match_trx_with_ib(
+                        trx,
+                        candidate_movements,
+                        bank_number=bank_number,
+                        account_number=account_number,
+                        valid_movement_dates=entry["valid_movement_dates"],
+                        used_fingerprints=used_fingerprints,
+                        allow_unidentified=allow_unidentified,
+                    )
+
+                    if not matched_result:
+                        if not allow_unidentified:
+                            # Retry in the second pass, once every receipt
+                            # has claimed the movement carrying its own CUIT.
+                            continue
+                        logger.info(
+                            "[NO MATCH] trx_id=%s amount=%s date=%s",
+                            trx_id,
+                            trx_amount,
+                            trx_date,
+                        )
+                        continue
+
+                    resolved_trx_ids.add(trx_id)
+                    matched_movement = matched_result["movement"]
+                    document_fingerprint = matched_result["document_fingerprint"]
+                    duplicated_trx = matched_result["duplicated_trx"]
+                    fingerprint_slot = matched_result["fingerprint_slot"]
+                    fingerprint_total_slots = matched_result[
+                        "fingerprint_total_slots"
+                    ]
+
                     logger.info(
-                        "[NO MATCH] trx_id=%s amount=%s date=%s",
+                        "[MATCH] trx_id=%s trx_amount=%s ib_amount=%s trx_date=%s ib_date=%s fingerprint=%s slot=%s/%s matched_by=%s",
                         trx_id,
                         trx_amount,
+                        matched_movement.get("amount"),
                         trx_date,
+                        matched_movement.get("movement_date"),
+                        document_fingerprint,
+                        fingerprint_slot,
+                        fingerprint_total_slots,
+                        matched_result.get("matched_by"),
                     )
-                    continue
 
-                matched_movement = matched_result["movement"]
-                document_fingerprint = matched_result["document_fingerprint"]
-                duplicated_trx = matched_result["duplicated_trx"]
-                fingerprint_slot = matched_result["fingerprint_slot"]
-                fingerprint_total_slots = matched_result[
-                    "fingerprint_total_slots"
-                ]
+                    if duplicated_trx:
+                        updated = mark_trx_as_repeated(
+                            trx_id=trx_id,
+                            document_fingerprint=document_fingerprint,
+                        )
+                        if updated:
+                            repeated_trx_count += 1
+                            logger.warning(
+                                "[TRX UPDATED] trx_id=%s status=repetida duplicate_of=%s duplicate_status=%s capacity_exhausted=%s/%s",
+                                trx_id,
+                                duplicated_trx.get("trx_id"),
+                                duplicated_trx.get("status"),
+                                fingerprint_total_slots,
+                                fingerprint_total_slots,
+                            )
+                        else:
+                            skipped_trx_count += 1
+                            skipped_by_reason["repeated_status_update_failed"] += 1
+                        continue
 
-                logger.info(
-                    "[MATCH] trx_id=%s trx_amount=%s ib_amount=%s trx_date=%s ib_date=%s fingerprint=%s slot=%s/%s",
-                    trx_id,
-                    trx_amount,
-                    matched_movement.get("amount"),
-                    trx_date,
-                    matched_movement.get("movement_date"),
-                    document_fingerprint,
-                    fingerprint_slot,
-                    fingerprint_total_slots,
-                )
-
-                if duplicated_trx:
-                    updated = mark_trx_as_repeated(
+                    fee_percentage = trx.get("fee_percentage")
+                    updated = update_trx_status(
                         trx_id=trx_id,
+                        new_status="conciliado",
+                        customer_balance_id=trx.get("customer_balance_id"),
+                        trx_amount=trx_amount,
+                        fee_percentage=fee_percentage,
                         document_fingerprint=document_fingerprint,
                     )
+
                     if updated:
-                        repeated_trx_count += 1
-                        logger.warning(
-                            "[TRX UPDATED] trx_id=%s status=repetida duplicate_of=%s duplicate_status=%s capacity_exhausted=%s/%s",
+                        updated_trx_count += 1
+                        used_fingerprints[document_fingerprint] = {
+                            "trx_id": trx_id,
+                            "status": "conciliado",
+                        }
+                        logger.info(
+                            "[TRX UPDATED] trx_id=%s status=conciliado fee_percentage=%s fee_amount=%s",
                             trx_id,
-                            duplicated_trx.get("trx_id"),
-                            duplicated_trx.get("status"),
-                            fingerprint_total_slots,
-                            fingerprint_total_slots,
+                            fee_percentage or 0,
+                            calculate_fee_amount(trx_amount, fee_percentage),
                         )
                     else:
                         skipped_trx_count += 1
-                        skipped_by_reason["repeated_status_update_failed"] += 1
-                    continue
+                        skipped_by_reason["conciliation_status_update_failed"] += 1
 
-                fee_percentage = trx.get("fee_percentage")
-                updated = update_trx_status(
-                    trx_id=trx_id,
-                    new_status="conciliado",
-                    customer_balance_id=trx.get("customer_balance_id"),
-                    trx_amount=trx_amount,
-                    fee_percentage=fee_percentage,
-                    document_fingerprint=document_fingerprint,
-                )
-
-                if updated:
-                    updated_trx_count += 1
-                    used_fingerprints[document_fingerprint] = {
-                        "trx_id": trx_id,
-                        "status": "conciliado",
-                    }
-                    logger.info(
-                        "[TRX UPDATED] trx_id=%s status=conciliado fee_percentage=%s fee_amount=%s",
-                        trx_id,
-                        fee_percentage or 0,
-                        calculate_fee_amount(trx_amount, fee_percentage),
-                    )
-                else:
+                except Exception:
+                    resolved_trx_ids.add(trx_id)
                     skipped_trx_count += 1
-                    skipped_by_reason["conciliation_status_update_failed"] += 1
-
-            except Exception:
-                skipped_trx_count += 1
-                skipped_by_reason["transaction_validation_failed"] += 1
-                logger.exception(
-                    "[ERROR] trx_validation_failed trx_id=%s account_number=%s",
-                    trx_id,
-                    account_number,
-                )
+                    skipped_by_reason["transaction_validation_failed"] += 1
+                    logger.exception(
+                        "[ERROR] trx_validation_failed trx_id=%s account_number=%s",
+                        trx_id,
+                        account_number,
+                    )
 
     result = build_job_result(
         started_at,
