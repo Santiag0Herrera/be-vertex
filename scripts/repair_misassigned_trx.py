@@ -35,6 +35,7 @@ import asyncio
 import csv
 import datetime
 import json
+import os
 import sys
 from collections import Counter, defaultdict
 from decimal import Decimal
@@ -51,7 +52,7 @@ def parse_args():
     parser.add_argument("--entity-id", type=int, help="limit to one entity (default: all)")
     parser.add_argument("--since", default=today.replace(day=1).isoformat(), help="first receipt date, YYYY-MM-DD (default: first day of this month)")
     parser.add_argument("--until", default=today.isoformat(), help="last receipt date, inclusive (default: today)")
-    parser.add_argument("--env-file", default="dev.env", help="only fills variables that are not already set")
+    parser.add_argument("--env-file", help="env file to load (default: .env, then dev.env); never overrides variables already set")
     parser.add_argument("--apply", action="store_true", help="revert and re-run reconciliation")
     parser.add_argument("--yes", action="store_true", help="skip the confirmation prompt")
     return parser.parse_args()
@@ -155,7 +156,13 @@ def slot_movements(vt, credits, bank_number, account_number):
 
 async def main():
     args = parse_args()
-    load_dotenv(dotenv_path=args.env_file)
+    for env_file in [args.env_file] if args.env_file else [".env", "dev.env"]:
+        load_dotenv(dotenv_path=env_file)
+    if not os.getenv("DATABASE_URL"):
+        raise SystemExit(
+            "Falta DATABASE_URL: corré el script desde la carpeta del backend "
+            "o pasá el archivo de variables con --env-file."
+        )
 
     # Imported after loading the env: the DB engine reads DATABASE_URL at import.
     from sqlalchemy import text
