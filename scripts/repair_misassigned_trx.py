@@ -105,11 +105,23 @@ async def fetch_credits(ib, bank_number, account_number, since, until):
             date_until=(end + datetime.timedelta(days=1)).isoformat(),
         )
         movements = result["movements_detail"]
-        if len(movements) >= ib.MOVEMENT_RESULT_LIMIT:
-            if start == end:
+        if len(movements) >= ib.MOVEMENT_RESULT_LIMIT and start == end:
+            # The padded request also covers the next day. Ask for the day
+            # alone, which only works if date-until is inclusive: an empty
+            # answer means it is exclusive and the day cannot be split further.
+            result = await ib.get_movement(
+                account_number=account_number,
+                bank_number=bank_number,
+                date_since=start.isoformat(),
+                date_until=start.isoformat(),
+            )
+            movements = result["movements_detail"]
+            if not movements or len(movements) >= ib.MOVEMENT_RESULT_LIMIT:
                 raise RuntimeError(
-                    f"{bank_number}/{account_number}: más de {ib.MOVEMENT_RESULT_LIMIT} movimientos el {start}"
+                    f"{bank_number}/{account_number}: Interbanking devuelve {ib.MOVEMENT_RESULT_LIMIT}+ "
+                    f"movimientos para {start} (con el día siguiente) y {len(movements)} para el día solo"
                 )
+        if len(movements) >= ib.MOVEMENT_RESULT_LIMIT:
             middle = start + (end - start) // 2
             pending[:0] = [(start, middle), (middle + datetime.timedelta(days=1), end)]
             continue
@@ -305,6 +317,20 @@ async def main():
 
     reverted = [t for t in trx_list if t["action"] == "revertir_conciliacion"]
     reopened = [t for t in trx_list if t["action"] == "volver_a_pendiente"]
+
+    # Coverage per account, so an empty report can be told apart from missing data.
+    print()
+    print("Cobertura por cuenta (trx en la ventana):")
+    coverage = defaultdict(Counter)
+    for trx in trx_list:
+        key = trx["account_key"]
+        label = "sin cuenta" if key is None else f"{key[0]}/{key[1]}" + (" (SIN MOVIMIENTOS)" if key in failed_accounts else "")
+        coverage[label][trx["status"]] += 1
+        if trx["status"] == "conciliado" and key is not None and key not in failed_accounts:
+            found = trx["document_fingerprint"] in movements_by_fingerprint
+            coverage[label]["conciliado_con_movimiento" if found else "conciliado_sin_movimiento_en_rango"] += 1
+    for label, counts in sorted(coverage.items()):
+        print(f"  {label}: " + ", ".join(f"{k}={v}" for k, v in sorted(counts.items())))
 
     # --- Simulation of the fixed job --------------------------------------
     for trx in reverted:
