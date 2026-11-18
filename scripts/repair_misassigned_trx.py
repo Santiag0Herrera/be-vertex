@@ -263,7 +263,7 @@ async def main():
             ),
             {"entity_ids": list(entity_indexes), "since": since, "until": until_exclusive},
         ).mappings().all()
-        used = {
+        base_used = {
             row["document_fingerprint"]: {"trx_id": row["trx_id"], "status": "conciliado"}
             for row in db.execute(
                 text(
@@ -293,12 +293,22 @@ async def main():
             )
 
     # --- Classification ---------------------------------------------------
+    # mandatory: the receipt has a CUIT and holds a movement from another CUIT.
+    # sin_cuit:  the receipt has no CUIT (extraction failed) and holds an
+    #            identified movement; reverted only if that CUIT's owner has a
+    #            receipt that needs the movement.
+    # tiene_propio: the receipt holds an unidentified movement while one with
+    #            its own CUIT and amount exists; reverted only if the fixed
+    #            matching would give it its own movement.
     identified_amounts = defaultdict(set)
     for info in movements_by_fingerprint.values():
         if info["sender_cuit"]:
             identified_amounts[info["sender_cuit"]].add(money(info["movement"].get("amount")))
 
+    trx_by_trx_id = {t["trx_id"]: t for t in trx_list}
+    mandatory, sin_cuit, tiene_propio = set(), set(), set()
     for trx in trx_list:
+        trx["reason"] = ""
         if trx["account_key"] is None or trx["account_key"] in failed_accounts:
             continue
         if trx["status"] == "repetido":
@@ -311,12 +321,9 @@ async def main():
             continue
         trx["movement_sender_cuit"] = info["sender_cuit"]
         if info["sender_cuit"] and info["sender_cuit"] != trx["cuit"]:
-            trx["action"] = "revertir_conciliacion"
+            (mandatory if trx["cuit"] else sin_cuit).add(trx["id"])
         elif not info["sender_cuit"] and money(trx["amount"]) in identified_amounts.get(trx["cuit"], ()):
-            trx["action"] = "revisar"
-
-    reverted = [t for t in trx_list if t["action"] == "revertir_conciliacion"]
-    reopened = [t for t in trx_list if t["action"] == "volver_a_pendiente"]
+            tiene_propio.add(trx["id"])
 
     # Coverage per account, so an empty report can be told apart from missing data.
     print()
@@ -333,51 +340,95 @@ async def main():
         print(f"  {label}: " + ", ".join(f"{k}={v}" for k, v in sorted(counts.items())))
 
     # --- Simulation of the fixed job --------------------------------------
-    for trx in reverted:
-        used.pop(trx["document_fingerprint"], None)
-
     calendar = BusinessCalendarService()
-    settlement_cache = {}
-    pending_ctx = []
+    date_cache = {}
+    movement_dates = {}
     for trx in trx_list:
-        reopens = trx["status"] == "pendiente" or trx["action"] in ("revertir_conciliacion", "volver_a_pendiente")
-        if not reopens or trx["account_key"] is None or trx["account_key"] in failed_accounts:
+        if trx["account_key"] is None or trx["account_key"] in failed_accounts:
             continue
         trx_date = trx["date"].date()
-        if trx_date not in settlement_cache:
-            settlement_cache[trx_date] = await calendar.get_settlement_date(trx_date)
-        pending_ctx.append((trx, {trx_date, settlement_cache[trx_date]}))
+        settlement, late = await vt.resolve_movement_dates(calendar, trx_date, date_cache)
+        movement_dates[trx["id"]] = ({trx_date, settlement}, {late})
 
-    resolved = set()
-    for allow_unidentified in (False, True):
-        for trx, valid_dates in pending_ctx:
-            if trx["id"] in resolved:
-                continue
-            key = trx["account_key"]
-            result = vt.match_trx_with_ib(
-                {
-                    "trx_id": trx["trx_id"],
-                    "trx_amount": trx["amount"],
-                    "trx_date": trx["date"],
-                    "trx_emisor_cuit": trx["emisor_cuit"],
-                },
-                vt.select_credit_movements(movement_index_by_account[key], trx["amount"], valid_dates),
-                bank_number=key[0],
-                account_number=key[1],
-                valid_movement_dates=valid_dates,
-                used_fingerprints=used,
-                allow_unidentified=allow_unidentified,
-            )
-            if result is None:
-                if allow_unidentified:
-                    trx["expected"] = "pendiente"
-                continue
-            resolved.add(trx["id"])
-            if result["duplicated_trx"]:
-                trx["expected"] = "repetido"
-            else:
-                trx["expected"] = f"conciliado ({result['matched_by']})"
-                used[result["document_fingerprint"]] = {"trx_id": trx["trx_id"], "status": "conciliado"}
+    by_id = {t["id"]: t for t in trx_list}
+
+    def simulate(revert_ids):
+        """Run the fixed two-pass matching as if revert_ids were reverted."""
+        used = dict(base_used)
+        for trx_id in revert_ids:
+            used.pop(by_id[trx_id]["document_fingerprint"], None)
+        candidates = [
+            t for t in trx_list
+            if t["id"] in movement_dates
+            and (t["status"] == "pendiente" or t["action"] == "volver_a_pendiente" or t["id"] in revert_ids)
+        ]
+        outcome = {}
+        for allow_unidentified in (False, True):
+            for trx in candidates:
+                if trx["id"] in outcome:
+                    continue
+                key = trx["account_key"]
+                valid_dates, late_dates = movement_dates[trx["id"]]
+                result = vt.match_trx_with_ib(
+                    {
+                        "trx_id": trx["trx_id"],
+                        "trx_amount": trx["amount"],
+                        "trx_date": trx["date"],
+                        "trx_emisor_cuit": trx["emisor_cuit"],
+                    },
+                    vt.select_credit_movements(movement_index_by_account[key], trx["amount"], valid_dates | late_dates),
+                    bank_number=key[0],
+                    account_number=key[1],
+                    valid_movement_dates=valid_dates,
+                    used_fingerprints=used,
+                    allow_unidentified=allow_unidentified,
+                    identified_movement_dates=late_dates,
+                )
+                if result is None:
+                    if allow_unidentified:
+                        outcome[trx["id"]] = ("pendiente", None)
+                    continue
+                if result["duplicated_trx"]:
+                    outcome[trx["id"]] = ("repetido", result["duplicated_trx"].get("trx_id"))
+                else:
+                    outcome[trx["id"]] = (f"conciliado ({result['matched_by']})", None)
+                    used[result["document_fingerprint"]] = {"trx_id": trx["trx_id"], "status": "conciliado"}
+        return outcome
+
+    selected_own = set(tiene_propio)
+    claimed_sin_cuit = set()
+    for _ in range(30):
+        outcome = simulate(mandatory | selected_own | claimed_sin_cuit)
+        changed_selection = False
+        for trx_id in list(selected_own):
+            if not outcome.get(trx_id, ("",))[0].startswith("conciliado"):
+                selected_own.discard(trx_id)
+                changed_selection = True
+        for trx_id, (expected, duplicate_of) in outcome.items():
+            holder = trx_by_trx_id.get(duplicate_of) if expected == "repetido" else None
+            if holder and holder["id"] in sin_cuit and holder["id"] not in claimed_sin_cuit:
+                claimed_sin_cuit.add(holder["id"])
+                changed_selection = True
+        if not changed_selection:
+            break
+    else:
+        print("ATENCION: la selección de reversiones no convergió; revisá el detalle antes de aplicar.")
+
+    reasons = {}
+    reasons.update({i: "cuit_distinto" for i in mandatory})
+    reasons.update({i: "sin_cuit_reclamado" for i in claimed_sin_cuit})
+    reasons.update({i: "recupera_su_movimiento" for i in selected_own})
+    for trx in trx_list:
+        if trx["id"] in reasons:
+            trx["action"] = "revertir_conciliacion"
+            trx["reason"] = reasons[trx["id"]]
+        if trx["id"] in outcome and (trx["action"] != "sin_cambios" or trx["status"] == "pendiente"):
+            trx["expected"] = outcome[trx["id"]][0]
+    kept_sin_cuit = sin_cuit - claimed_sin_cuit
+    kept_own = tiene_propio - selected_own
+
+    reverted = [t for t in trx_list if t["action"] == "revertir_conciliacion"]
+    reopened = [t for t in trx_list if t["action"] == "volver_a_pendiente"]
 
     # --- Report -----------------------------------------------------------
     balance = {}
@@ -409,15 +460,21 @@ async def main():
     changed = reverted + reopened
     print()
     print(f"Ventana: {since} a {until} | entidades: {', '.join(map(str, entity_indexes)) or '-'}")
-    print(f"Conciliadas con plata ajena (se revierten): {len(reverted)}")
+    print(f"Conciliaciones que se revierten:            {len(reverted)}")
+    print(f"  con CUIT de otra persona:                 {len(mandatory)}")
+    print(f"  sin CUIT, el dueño reclama el movimiento: {len(claimed_sin_cuit)}")
+    print(f"  recuperan su propio movimiento:           {len(selected_own)}")
     print(f"Repetidas que vuelven a pendiente:          {len(reopened)}")
-    print(f"Conciliadas a revisar a mano (no se tocan): {count(lambda t: t['action'] == 'revisar')}")
+    print(f"Se mantienen (sin CUIT y nadie reclama):    {len(kept_sin_cuit)}")
+    print(f"Se mantienen (no recuperarían el propio):   {len(kept_own)}")
     print()
     print("Resultado esperado de las trx corregidas:")
     for label in ("conciliado (sender_cuit)", "conciliado (amount_date)", "repetido", "pendiente"):
         print(f"  {label:26} {count(lambda t, l=label: t['expected'] == l, changed)}")
+    newly_pending = [t for t in trx_list if t["status"] == "pendiente" and (t["expected"] or "").startswith("conciliado")]
+    print(f"Además, pendientes actuales que se concilian en la misma corrida: {len(newly_pending)}")
     print()
-    print("Impacto en saldos:")
+    print("Impacto en saldos (solo trx corregidas):")
     for acc_id, acc in sorted(balance.items()):
         if not acc["revert"] and not acc["readd"]:
             continue
@@ -429,21 +486,26 @@ async def main():
             f"-{acc['revert']:,} | +{acc['readd']:,} | final {final:,} ({final - acc['current']:+,}){warn}"
         )
     print()
-    print("Detalle de trx corregidas (id | entidad | fecha | monto | emisor | cuit | estado -> esperado | cuit del movimiento):")
+    print("Detalle (id | entidad | fecha | monto | emisor | cuit | estado -> esperado | cuit del movimiento | motivo):")
     for trx in sorted(changed, key=lambda t: (t["entity_id"], t["date"])):
         print(
             f"  {trx['id']} | {trx['entity_id']} | {trx['date']:%Y-%m-%d %H:%M} | {money(trx['amount']):,} | "
             f"{trx['emisor_name']} | {trx['emisor_cuit']} | {trx['status']} -> {trx['expected']} | "
-            f"{trx['movement_sender_cuit'] or '-'}"
+            f"{trx['movement_sender_cuit'] or '-'} | {trx['reason'] or '-'}"
         )
-    for trx in sorted((t for t in trx_list if t["action"] == "revisar"), key=lambda t: t["id"]):
-        print(f"  REVISAR {trx['id']} | {trx['entity_id']} | {money(trx['amount']):,} | {trx['emisor_name']} | {trx['emisor_cuit']}")
+    for trx_id in sorted(kept_sin_cuit | kept_own):
+        trx = by_id[trx_id]
+        trx["action"] = "se_mantiene"
+        print(
+            f"  SE MANTIENE {trx['id']} | {trx['date']:%Y-%m-%d %H:%M} | {money(trx['amount']):,} | "
+            f"{trx['emisor_name']} | {trx['emisor_cuit']} | cuit del movimiento {trx['movement_sender_cuit'] or '-'}"
+        )
 
     stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
     report_path = f"repair_report_{since}_{until}_{stamp}.csv"
     columns = [
         "id", "trx_id", "entity_id", "client_name", "date", "amount", "emisor_name", "emisor_cuit",
-        "status", "action", "movement_sender_cuit", "expected", "document_fingerprint",
+        "status", "action", "reason", "movement_sender_cuit", "expected", "document_fingerprint",
     ]
     with open(report_path, "w", newline="", encoding="utf-8") as fh:
         writer = csv.DictWriter(fh, fieldnames=columns, extrasaction="ignore")

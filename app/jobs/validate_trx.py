@@ -406,6 +406,22 @@ def build_fingerprint_slot(base_fingerprint, slot_number):
     return f"{base_fingerprint}:{slot_number}"
 
 
+async def resolve_movement_dates(business_calendar, trx_date, cache):
+    """Return (settlement_date, late_booking_date) for a receipt date.
+
+    A transfer is booked on its settlement date, or on the next business day
+    when it was made after the bank cutoff. Only movements carrying the
+    receipt's CUIT are searched on that later date.
+    """
+    if trx_date not in cache:
+        settlement_date = await business_calendar.get_settlement_date(trx_date)
+        late_booking_date = await business_calendar.get_settlement_date(
+            settlement_date + datetime.timedelta(days=1)
+        )
+        cache[trx_date] = (settlement_date, late_booking_date)
+    return cache[trx_date]
+
+
 def build_credit_movement_index(movements):
     movement_index = defaultdict(list)
     for movement in movements:
@@ -481,6 +497,7 @@ def match_trx_with_ib(
     valid_movement_dates=None,
     used_fingerprints=None,
     allow_unidentified=True,
+    identified_movement_dates=None,
 ):
     """Pick the bank movement that backs a pending receipt.
 
@@ -491,6 +508,11 @@ def match_trx_with_ib(
     ``allow_unidentified`` is true, so callers can let every receipt claim its
     own identified movement before anyone falls back to the shared pool.
 
+    ``identified_movement_dates`` are extra dates searched only for movements
+    carrying the receipt's own CUIT: transfers made after the bank cutoff are
+    booked on the next business day, and the CUIT rules out taking someone
+    else's money there.
+
     Returns an available match, a used identified match (a real duplicate), or
     None when nothing backs the receipt yet (it stays pending).
     """
@@ -498,6 +520,8 @@ def match_trx_with_ib(
     trx_date = trx["trx_date"].date()
     trx_cuit = normalize_cuit(trx.get("trx_emisor_cuit"))
     valid_movement_dates = set(valid_movement_dates or [trx_date])
+    identified_only_dates = set(identified_movement_dates or ()) - valid_movement_dates
+    searched_dates = valid_movement_dates | identified_only_dates
     matching_movements = []
 
     for mov in ib_movements:
@@ -508,7 +532,7 @@ def match_trx_with_ib(
         mov_type = mov.get("debit_credit_type")
 
         amount_matches = abs(trx_amount) == abs(mov_amount)
-        date_matches = mov_date in valid_movement_dates
+        date_matches = mov_date in searched_dates
         type_matches = mov_type == "C"
 
         if amount_matches or date_matches:
@@ -535,6 +559,7 @@ def match_trx_with_ib(
                     "base_fingerprint": base_fingerprint,
                     "has_strong_identifier": has_strong_movement_identifier(mov),
                     "sender_cuit": movement_sender_cuit(mov),
+                    "in_base_window": mov_date in valid_movement_dates,
                 }
             )
 
@@ -586,7 +611,7 @@ def match_trx_with_ib(
     unidentified = [
         candidate
         for candidate in slotted_candidates
-        if candidate["sender_cuit"] is None
+        if candidate["sender_cuit"] is None and candidate["in_base_window"]
     ]
     ordered_candidates = [(candidate, "sender_cuit") for candidate in identified]
     if allow_unidentified:
@@ -983,11 +1008,11 @@ async def _run_reconciliation(entity_id=None) -> dict:
 
         trx_date = trx["trx_date"].date()
         try:
-            if trx_date not in settlement_dates:
-                settlement_dates[trx_date] = (
-                    await business_calendar.get_settlement_date(trx_date)
-                )
-            settlement_date = settlement_dates[trx_date]
+            settlement_date, late_booking_date = await resolve_movement_dates(
+                business_calendar,
+                trx_date,
+                settlement_dates,
+            )
         except Exception:
             skipped_trx_count += 1
             skipped_by_reason["settlement_date_failed"] += 1
@@ -998,7 +1023,7 @@ async def _run_reconciliation(entity_id=None) -> dict:
             continue
 
         date_since = trx_date.isoformat()
-        date_until = (settlement_date + datetime.timedelta(days=1)).isoformat()
+        date_until = (late_booking_date + datetime.timedelta(days=1)).isoformat()
         group_key = (
             normalize_account(account.get("bank_number")),
             normalize_account(account.get("account_number")),
@@ -1010,6 +1035,7 @@ async def _run_reconciliation(entity_id=None) -> dict:
                 "trx": trx,
                 "account": account,
                 "valid_movement_dates": {trx_date, settlement_date},
+                "identified_movement_dates": {late_booking_date},
             }
         )
 
@@ -1091,7 +1117,8 @@ async def _run_reconciliation(entity_id=None) -> dict:
                     candidate_movements = select_credit_movements(
                         movement_index,
                         trx_amount,
-                        entry["valid_movement_dates"],
+                        entry["valid_movement_dates"]
+                        | entry["identified_movement_dates"],
                     )
                     matched_result = match_trx_with_ib(
                         trx,
@@ -1101,6 +1128,7 @@ async def _run_reconciliation(entity_id=None) -> dict:
                         valid_movement_dates=entry["valid_movement_dates"],
                         used_fingerprints=used_fingerprints,
                         allow_unidentified=allow_unidentified,
+                        identified_movement_dates=entry["identified_movement_dates"],
                     )
 
                     if not matched_result:

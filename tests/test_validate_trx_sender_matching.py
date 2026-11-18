@@ -238,3 +238,103 @@ async def test_unidentified_pool_waits_until_identified_movements_are_claimed(mo
     assert conciliated["B-FIRST"] == _fingerprint(own_b)
     assert conciliated["A-COELSA"] == _fingerprint(pool)
     assert repeated == []
+
+
+def _on(movement, day):
+    return {**movement, "movement_date": f"{day.isoformat()}T00:00:00"}
+
+
+def test_late_booked_identified_movement_matches_on_next_business_day():
+    monday = datetime.date(2026, 11, 16)
+    own = _on(_banelco(CUIT_A, 155), monday)
+    trx = {**_trx("FRIDAY-NIGHT", cuit=CUIT_A), "trx_date": datetime.datetime(2026, 11, 13, 18, 1)}
+
+    result = validate_trx.match_trx_with_ib(
+        trx,
+        [own],
+        bank_number="017",
+        account_number="0430509162",
+        valid_movement_dates={datetime.date(2026, 11, 13)},
+        used_fingerprints={},
+        identified_movement_dates={monday},
+    )
+
+    assert result["matched_by"] == "sender_cuit"
+    assert result["document_fingerprint"] == _fingerprint(own)
+
+
+def test_late_booking_date_is_not_searched_for_unidentified_movements():
+    monday = datetime.date(2026, 11, 16)
+    trx = {**_trx("FRIDAY-NIGHT", cuit=CUIT_A), "trx_date": datetime.datetime(2026, 11, 13, 18, 1)}
+
+    result = validate_trx.match_trx_with_ib(
+        trx,
+        [_on(_coelsa(130), monday)],
+        bank_number="017",
+        account_number="0430509162",
+        valid_movement_dates={datetime.date(2026, 11, 13)},
+        used_fingerprints={},
+        identified_movement_dates={monday},
+    )
+
+    assert result is None
+
+
+class WeekdayCalendar:
+    async def get_settlement_date(self, transaction_date):
+        while transaction_date.weekday() >= 5:
+            transaction_date += datetime.timedelta(days=1)
+        return transaction_date
+
+
+@pytest.mark.asyncio
+async def test_resolve_movement_dates_returns_next_business_day():
+    cache = {}
+    friday = datetime.date(2026, 11, 13)
+    saturday = datetime.date(2026, 11, 14)
+
+    assert await validate_trx.resolve_movement_dates(WeekdayCalendar(), friday, cache) == (
+        friday,
+        datetime.date(2026, 11, 16),
+    )
+    assert await validate_trx.resolve_movement_dates(WeekdayCalendar(), saturday, cache) == (
+        datetime.date(2026, 11, 16),
+        datetime.date(2026, 11, 17),
+    )
+
+
+@pytest.mark.asyncio
+async def test_job_fetches_and_matches_the_late_booking_day(monkeypatch):
+    # Receipt from today; its transfer is booked tomorrow (after the cutoff).
+    pending = [_pending("LATE", CUIT_A)]
+    trx_date = pending[0]["trx_date"].date()
+    tomorrow = trx_date + datetime.timedelta(days=1)
+    movement = _banelco(CUIT_A, 155)
+    calls = []
+
+    class LateInterbanking(FakeInterbanking):
+        async def get_movement(self, account_number, bank_number, date_since, date_until):
+            calls.append((date_since, date_until))
+            return {"movements_detail": [_on(movement, tomorrow)]}
+
+    conciliated = {}
+    monkeypatch.setattr(validate_trx, "get_pending_trx", lambda entity_id: pending)
+    monkeypatch.setattr(
+        validate_trx,
+        "get_entity_account_identifiers",
+        lambda entity_id: validate_trx.account_identifier_aliases("0430509162"),
+    )
+    monkeypatch.setattr(validate_trx, "get_used_fingerprints", lambda entity_id=None: {})
+    monkeypatch.setattr(validate_trx, "expire_old_pending_trx", lambda *a, **k: 0)
+    monkeypatch.setattr(validate_trx, "InterBankingService", lambda: LateInterbanking([]))
+    monkeypatch.setattr(validate_trx, "BusinessCalendarService", FakeBusinessCalendar)
+    monkeypatch.setattr(
+        validate_trx,
+        "update_trx_status",
+        lambda **kwargs: conciliated.setdefault(kwargs["trx_id"], kwargs["document_fingerprint"]) or True,
+    )
+
+    await validate_trx._run_reconciliation(entity_id=1)
+
+    assert calls == [(trx_date.isoformat(), (tomorrow + datetime.timedelta(days=1)).isoformat())]
+    assert conciliated["LATE"] == _fingerprint(_on(movement, tomorrow))
