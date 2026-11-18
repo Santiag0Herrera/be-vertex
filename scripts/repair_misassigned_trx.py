@@ -396,23 +396,43 @@ async def main():
         return outcome
 
     selected_own = set(tiene_propio)
-    claimed_sin_cuit = set()
+    claims = {}  # sin_cuit holder id -> id of the receipt that needs its movement
     for _ in range(30):
-        outcome = simulate(mandatory | selected_own | claimed_sin_cuit)
+        outcome = simulate(mandatory | selected_own | set(claims))
         changed_selection = False
+        blocked_by_holder = {}
+        for trx_id, (expected, duplicate_of) in outcome.items():
+            holder = trx_by_trx_id.get(duplicate_of) if expected == "repetido" else None
+            if holder and holder["id"] in sin_cuit:
+                blocked_by_holder[trx_id] = holder["id"]
+                if holder["id"] not in claims:
+                    claims[holder["id"]] = trx_id
+                    changed_selection = True
         for trx_id in list(selected_own):
+            # A receipt blocked only by a sin_cuit holder keeps its chance:
+            # that holder is being claimed for it in this same round.
+            if trx_id in blocked_by_holder:
+                continue
             if not outcome.get(trx_id, ("",))[0].startswith("conciliado"):
                 selected_own.discard(trx_id)
                 changed_selection = True
-        for trx_id, (expected, duplicate_of) in outcome.items():
-            holder = trx_by_trx_id.get(duplicate_of) if expected == "repetido" else None
-            if holder and holder["id"] in sin_cuit and holder["id"] not in claimed_sin_cuit:
-                claimed_sin_cuit.add(holder["id"])
+        # A claim only stands while its claimant is still part of the repair.
+        for holder_id, claimant_id in list(claims.items()):
+            claimant = by_id[claimant_id]
+            claimant_active = (
+                claimant["status"] in ("pendiente", "repetido")
+                or claimant_id in mandatory
+                or claimant_id in selected_own
+                or claimant_id in claims
+            )
+            if not claimant_active:
+                del claims[holder_id]
                 changed_selection = True
         if not changed_selection:
             break
     else:
         print("ATENCION: la selección de reversiones no convergió; revisá el detalle antes de aplicar.")
+    claimed_sin_cuit = set(claims)
 
     reasons = {}
     reasons.update({i: "cuit_distinto" for i in mandatory})
