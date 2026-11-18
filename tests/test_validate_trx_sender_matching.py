@@ -338,3 +338,95 @@ async def test_job_fetches_and_matches_the_late_booking_day(monkeypatch):
 
     assert calls == [(trx_date.isoformat(), (tomorrow + datetime.timedelta(days=1)).isoformat())]
     assert conciliated["LATE"] == _fingerprint(_on(movement, tomorrow))
+
+
+class RangeInterbanking:
+    """Serves movements by movement_date, inclusive on both ends."""
+
+    def __init__(self, movements, limit):
+        self.MOVEMENT_RESULT_LIMIT = limit
+        self.movements = movements
+        self.calls = []
+
+    async def get_movement(self, account_number, bank_number, date_since, date_until):
+        self.calls.append((date_since, date_until))
+        since = datetime.date.fromisoformat(date_since)
+        until = datetime.date.fromisoformat(date_until)
+        return {
+            "movements_detail": [
+                dict(m)
+                for m in self.movements
+                if since <= datetime.date.fromisoformat(m["movement_date"][:10]) <= until
+            ]
+        }
+
+
+async def _fetch(ib, since, until):
+    return await validate_trx.fetch_movements_within_limit(
+        ib, account_number="0430509162", bank_number="017", date_since=since, date_until=until
+    )
+
+
+@pytest.mark.asyncio
+async def test_fetch_returns_single_answer_when_under_limit():
+    ib = RangeInterbanking([_on(_coelsa(1), datetime.date(2026, 11, 10))], limit=5)
+
+    movements = await _fetch(ib, "2026-11-10", "2026-11-12")
+
+    assert len(movements) == 1
+    assert ib.calls == [("2026-11-10", "2026-11-12")]
+
+
+@pytest.mark.asyncio
+async def test_fetch_splits_by_day_without_duplicating_overlaps():
+    d10, d11, d12 = (datetime.date(2026, 11, day) for day in (10, 11, 12))
+    movements = (
+        [_on(_banelco(CUIT_A, i), d10) for i in range(2)]
+        + [_on(_coelsa(10 + i), d11) for i in range(3)]
+        + [_on(_banelco(CUIT_B, 20), d12)]
+    )
+    # Two identical rows in one answer are two real movements and must stay.
+    movements.append(_on(_coelsa(10), d11))
+    ib = RangeInterbanking(movements, limit=6)
+
+    fetched = await _fetch(ib, "2026-11-10", "2026-11-12")
+
+    assert len(fetched) == len(movements)
+    assert sum(1 for m in fetched if m["correlative_number"] == "10") == 2
+
+
+@pytest.mark.asyncio
+async def test_fetch_asks_for_a_busy_day_alone():
+    d11, d12 = datetime.date(2026, 11, 11), datetime.date(2026, 11, 12)
+    movements = [_on(_coelsa(i), d11) for i in range(4)] + [_on(_coelsa(10 + i), d12) for i in range(3)]
+    ib = RangeInterbanking(movements, limit=5)
+
+    fetched = await _fetch(ib, "2026-11-11", "2026-11-12")
+
+    assert len(fetched) == 7
+    assert ("2026-11-11", "2026-11-11") in ib.calls
+
+
+@pytest.mark.asyncio
+async def test_fetch_refuses_a_day_over_the_limit():
+    d11 = datetime.date(2026, 11, 11)
+    ib = RangeInterbanking([_on(_coelsa(i), d11) for i in range(6)], limit=5)
+
+    with pytest.raises(RuntimeError):
+        await _fetch(ib, "2026-11-11", "2026-11-12")
+
+
+@pytest.mark.asyncio
+async def test_fetch_refuses_when_single_day_request_comes_back_empty():
+    class ExclusiveUntil(RangeInterbanking):
+        async def get_movement(self, account_number, bank_number, date_since, date_until):
+            if date_since == date_until:
+                self.calls.append((date_since, date_until))
+                return {"movements_detail": []}
+            return await super().get_movement(account_number, bank_number, date_since, date_until)
+
+    d11, d12 = datetime.date(2026, 11, 11), datetime.date(2026, 11, 12)
+    movements = [_on(_coelsa(i), d11) for i in range(4)] + [_on(_coelsa(10 + i), d12) for i in range(3)]
+
+    with pytest.raises(RuntimeError):
+        await _fetch(ExclusiveUntil(movements, limit=5), "2026-11-11", "2026-11-12")

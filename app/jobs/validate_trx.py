@@ -3,6 +3,7 @@
 import asyncio
 import datetime
 import hashlib
+import json
 import logging
 import re
 from collections import Counter, defaultdict
@@ -404,6 +405,81 @@ def build_fingerprint_slot(base_fingerprint, slot_number):
     if slot_number == 1:
         return base_fingerprint
     return f"{base_fingerprint}:{slot_number}"
+
+
+def _movement_key(movement):
+    return json.dumps(movement, sort_keys=True, default=str)
+
+
+async def fetch_movements_within_limit(
+    ib_service,
+    account_number,
+    bank_number,
+    date_since,
+    date_until,
+):
+    """Fetch movements for a range without ever reconciling a truncated answer.
+
+    Interbanking caps each answer at MOVEMENT_RESULT_LIMIT rows. When the whole
+    range hits the cap, it is fetched one day at a time; a day that still hits
+    the cap with the next day included is asked for alone. If a single day
+    cannot be fetched under the cap, this raises and the batch stays pending.
+
+    Day requests overlap because it is not documented whether date-until is
+    inclusive, so identical rows seen in several answers are merged keeping
+    the highest count any single answer had: overlaps never add capacity and
+    genuinely repeated rows inside one answer are preserved.
+    """
+    limit = ib_service.MOVEMENT_RESULT_LIMIT
+
+    async def request(since, until):
+        result = await ib_service.get_movement(
+            account_number=account_number,
+            bank_number=bank_number,
+            date_since=since.isoformat(),
+            date_until=until.isoformat(),
+        )
+        return result["movements_detail"]
+
+    since = datetime.date.fromisoformat(date_since)
+    until = datetime.date.fromisoformat(date_until)
+    movements = await request(since, until)
+    if len(movements) < limit:
+        return movements
+
+    logger.info(
+        "[IB FETCH SPLIT] account_number=%s bank_number=%s range_start=%s range_end=%s reason=result_limit",
+        account_number,
+        bank_number,
+        date_since,
+        date_until,
+    )
+    best_counts = Counter()
+    first_seen = {}
+    day = since
+    while day <= until:
+        day_movements = await request(day, day + datetime.timedelta(days=1))
+        if len(day_movements) >= limit:
+            day_movements = await request(day, day)
+            if not day_movements or len(day_movements) >= limit:
+                raise RuntimeError(
+                    "Interbanking movement result reached its safety limit for "
+                    f"{day.isoformat()}; the batch will remain pending to avoid "
+                    "reconciling truncated data"
+                )
+        counts = Counter()
+        for movement in day_movements:
+            key = _movement_key(movement)
+            counts[key] += 1
+            first_seen.setdefault(key, movement)
+        for key, count in counts.items():
+            best_counts[key] = max(best_counts[key], count)
+        day += datetime.timedelta(days=1)
+
+    merged = []
+    for key, count in best_counts.items():
+        merged.extend(dict(first_seen[key]) for _ in range(count))
+    return merged
 
 
 async def resolve_movement_dates(business_calendar, trx_date, cache):
@@ -1059,18 +1135,13 @@ async def _run_reconciliation(entity_id=None) -> dict:
         movement_requests += 1
 
         try:
-            ib_movements_result = await ib_service.get_movement(
+            movements = await fetch_movements_within_limit(
+                ib_service,
                 account_number=account_number,
                 bank_number=bank_number,
                 date_since=date_since,
                 date_until=date_until,
             )
-            movements = ib_movements_result["movements_detail"]
-            if len(movements) >= ib_service.MOVEMENT_RESULT_LIMIT:
-                raise RuntimeError(
-                    "Interbanking movement result reached its safety limit; "
-                    "the batch will remain pending to avoid reconciling truncated data"
-                )
             movement_index = build_credit_movement_index(movements)
         except Exception:
             skipped_trx_count += len(entries)
