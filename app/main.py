@@ -30,6 +30,7 @@ from app.router import (
     dashboard,
     documents,
     adjustments,
+    interbanking,
 )
 
 ENV = os.getenv("ENVIRONMENT", "dev")
@@ -68,3 +69,4 @@ app.include_router(logs.router)
 app.include_router(dashboard.router)
 app.include_router(documents.router)
 app.include_router(adjustments.router)
+app.include_router(interbanking.router)

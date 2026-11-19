@@ -145,3 +145,11 @@ async def require_admin_user(
   if user.get('user_perm') not in {'admin', 'super'}:
     raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Administrator required')
   return user
+
+
+async def require_super_user(
+  user: Annotated[dict, Depends(require_internal_user)],
+) -> dict:
+  if user.get('user_perm') != 'super':
+    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail='Super user required')
+  return user
