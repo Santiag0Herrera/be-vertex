@@ -135,12 +135,8 @@ class AccountAdjustmentService:
 
       amount = Decimal(request.amount).quantize(CENTS)
       before = Decimal(str(balance.balance_amount)).quantize(CENTS)
-      if request.type == "credito":
-        after = before + amount
-      else:
-        if amount > before:
-          self.error.raise_conflict("El monto de la nota de débito supera el saldo disponible.")
-        after = before - amount
+      # Una nota de débito puede dejar la cuenta con saldo negativo.
+      after = before + amount if request.type == "credito" else before - amount
 
       adjustment = AccountAdjustments(
         entity_id=self.req_user.get("entity_id"),

@@ -39,7 +39,7 @@ Diseño completo en `../implementation_plan.md`.
 
 ## 4. Conciliación contra Interbanking
 
-`POST /trx/reconcile-pending` (usuarios internos) ejecuta `app/jobs/validate_trx.py` para la entidad del usuario. También puede correrse para todas las entidades:
+`POST /trx/reconcile-pending` (usuarios internos) inicia `app/jobs/validate_trx.py` para la entidad del usuario como tarea en segundo plano (`app/services/ReconciliationRunService.py`) y responde **202** con `run_id` y `state: running`. El frontend consulta `GET /trx/reconcile-pending` cada 2 segundos hasta que el estado pasa a `completed` (con `result`) o `failed` (con `error.status_code` y `error.detail`). Antes la conciliación corría dentro del request: si tardaba más que el timeout del proxy o del navegador, el frontend recibía un error y mostraba que no se había conciliado nada aunque el job seguía y conciliaba. El estado vive en memoria del proceso de la API. También puede correrse para todas las entidades:
 
 ```bash
 python -m app.jobs.validate_trx
@@ -65,7 +65,7 @@ Sólo puede haber una ejecución a la vez: la API usa un lock en memoria (respon
 
 El índice único `uq_trx_conciliated_document_fingerprint` garantiza a nivel de base que un movimiento bancario no se use dos veces.
 
-La respuesta del endpoint resume la ejecución con `checked`, `conciliated`, `repeated`, `expired`, `skipped`, `skipped_by_reason`, `still_pending`, `movement_requests`, `movement_cache_hits` y `duration_seconds`.
+El `result` de una ejecución terminada resume la ejecución con `checked`, `conciliated`, `repeated`, `expired`, `skipped`, `skipped_by_reason`, `still_pending`, `movement_requests`, `movement_cache_hits` y `duration_seconds`.
 
 ## Estados de una transacción
 

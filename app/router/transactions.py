@@ -1,7 +1,6 @@
 from datetime import date
 from typing import Annotated
 from sqlalchemy.orm import Session
-import asyncio
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from app.db.database import get_db
@@ -13,6 +12,7 @@ from app.schemas.transactions import (
     MovementsRequest,
 )
 from app.jobs.validate_trx import run as run_reconciliation_job
+from app.services.ReconciliationRunService import ReconciliationRunService
 from app.services.DBService import DBService
 from app.services.InterBankingService import InterBankingService
 from app.services.SuccessService import SuccessService
@@ -27,7 +27,7 @@ db_dependency = Annotated[Session, Depends(get_db)]
 user_dependency = Annotated[dict, Depends(get_current_user)]
 internal_dependency = Annotated[dict, Depends(require_internal_user)]
 client_dependency = Annotated[dict, Depends(require_client)]
-reconciliation_job_lock = asyncio.Lock()
+reconciliation_runs = ReconciliationRunService(run_reconciliation_job)
 
 
 def _normalize_account(value: object) -> str:
@@ -80,19 +80,19 @@ async def _require_entity_interbanking_account(
 
 @router.post(
     "/reconcile-pending",
-    status_code=status.HTTP_200_OK,
+    status_code=status.HTTP_202_ACCEPTED,
 )
 async def reconcile_pending_transactions(user: internal_dependency):
-    if reconciliation_job_lock.locked():
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="The reconciliation job is already running",
-        )
+    """Start the reconciliation in the background; poll GET for its result."""
+    return SuccessService.response(reconciliation_runs.start(user["entity_id"]))
 
-    async with reconciliation_job_lock:
-        return SuccessService.response(
-            await run_reconciliation_job(entity_id=user["entity_id"])
-        )
+
+@router.get(
+    "/reconcile-pending",
+    status_code=status.HTTP_200_OK,
+)
+async def get_reconciliation_run(user: internal_dependency):
+    return SuccessService.response(reconciliation_runs.get(user["entity_id"]))
 
 
 @router.get("/all", status_code=status.HTTP_200_OK)

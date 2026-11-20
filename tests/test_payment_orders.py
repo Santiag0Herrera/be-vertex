@@ -58,17 +58,17 @@ def test_partial_then_full(setup):
     assert db.query(Payments).count() == 2
 
 
-def test_overexecution_and_insufficient_current_balance(setup):
+def test_overexecution_rejected_and_execution_can_leave_negative_balance(setup):
     db, balance, _, user = setup
     order_id = create(setup)
     with pytest.raises(HTTPException):
         user.execute(ExecutePaymentOrderRequest(order_id=order_id, amount=81))
     user.payments.create(NewPaymentRequest(amount=50, date=datetime.utcnow(), customer_balance_id=balance.id, currency_id=balance.balance_currency_id))
-    with pytest.raises(HTTPException):
-        user.execute(ExecutePaymentOrderRequest(order_id=order_id))
-    assert db.query(Payments).count() == 1
-    assert db.get(PaymentOrders, order_id).executed_amount == 0
-    assert balance.balance_amount == 50
+    result = user.execute(ExecutePaymentOrderRequest(order_id=order_id))["result"]
+    assert result["status"] == "ejecutada"
+    assert db.query(Payments).count() == 2
+    assert db.get(PaymentOrders, order_id).executed_amount == 80
+    assert balance.balance_amount == -30
 
 
 def test_access_control(setup):
@@ -109,10 +109,12 @@ def test_invalid_amount(amount):
         ExecutePaymentOrderRequest(order_id=1, amount=amount)
 
 
-def test_creation_insufficient_balance(setup):
-    with pytest.raises(HTTPException):
-        create(setup, "101")
-    assert setup[0].query(PaymentOrders).count() == 0
+def test_creation_can_exceed_balance(setup):
+    order_id = create(setup, "150")
+    order = setup[0].get(PaymentOrders, order_id)
+    assert order.amount == 150
+    assert order.status == "pendiente_aprobacion"
+    assert setup[1].balance_amount == 100
 
 
 def test_get_all_is_paginated(setup):
@@ -144,3 +146,10 @@ def test_get_detail_payments_are_paginated(setup):
     assert second_page["payments"][0]["amount"] == 20
     assert first_page["totalRecords"] == 2
     assert first_page["totalPages"] == 2
+
+
+def test_manual_payment_can_leave_negative_balance(setup):
+    db, balance, _, user = setup
+    user.payments.create(NewPaymentRequest(amount=130.5, date=datetime.utcnow(), customer_balance_id=balance.id, currency_id=balance.balance_currency_id))
+    assert balance.balance_amount == -30.5
+    assert db.query(Payments).count() == 1

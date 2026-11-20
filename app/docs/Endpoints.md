@@ -50,14 +50,15 @@ No hay endpoint de alta, modificación ni baja de entidades. Esa administración
 
 Ajustes internos del saldo (`balance_amount`) sin pago ni transacción. No son comprobantes fiscales. Las notas no se editan ni se borran: se anulan y la anulación revierte su efecto. Aparecen como movimientos `Nota de credito` / `Nota de debito` en `/balance/detail` y `/balance/client/detail`.
 
-- `POST /adjustments/create` — sólo administradores. `type` es `credito` (suma) o `debito` (resta). Responde 409 si la moneda no coincide o si la nota de débito supera el saldo. Numeración correlativa por entidad y tipo (`NC-0001`, `ND-0001`).
+- `POST /adjustments/create` — sólo administradores. `type` es `credito` (suma) o `debito` (resta). Responde 409 si la moneda no coincide. Una nota de débito puede dejar el saldo negativo. Numeración correlativa por entidad y tipo (`NC-0001`, `ND-0001`).
 - `POST /adjustments/annul` — sólo administradores; exige motivo. Responde 409 si ya está anulada o si anular una nota de crédito dejaría el saldo negativo.
 - `GET /adjustments/all?balance_id=` — usuarios internos.
 - `GET /adjustments/detail?id=` — usuarios internos.
 
 ## Transacciones y conciliación
 
-- `POST /trx/reconcile-pending` — usuarios internos; ejecuta la conciliación de la entidad. Responde 409 si ya hay una en curso. Ver [Conciliacion.md](Conciliacion.md).
+- `POST /trx/reconcile-pending` — usuarios internos; inicia la conciliación de la entidad en segundo plano y responde 202 con el estado de la ejecución. Responde 409 si ya hay una en curso. Ver [Conciliacion.md](Conciliacion.md).
+- `GET /trx/reconcile-pending` — usuarios internos; estado de la última conciliación de la entidad (`idle`, `running`, `completed` con `result`, `failed` con `error`).
 - `GET /trx/all`
 - `GET /trx/report.csv` — reporte CSV para usuarios internos; admite `month`, `date_from`, `date_to` (sobre la fecha de recepción del cliente), `status`, `client_id` y múltiples `account_ids`.
 - `GET /trx/all_by_client` — sólo el cliente autenticado.
@@ -72,11 +73,11 @@ Ajustes internos del saldo (`balance_amount`) sin pago ni transacción. No son c
 
 ## Pagos y órdenes
 
-- `POST /payments/create`
-- `POST /payment-orders/create` — sólo clientes.
+- `POST /payments/create` — puede dejar el saldo negativo.
+- `POST /payment-orders/create` — sólo clientes. El importe puede superar el saldo actual.
 - `GET /payment-orders/all`
 - `GET /payment-orders/detail`
-- `POST /payment-orders/execute` — sólo usuarios internos.
+- `POST /payment-orders/execute` — sólo usuarios internos. Puede dejar el saldo negativo; responde 409 si el importe supera el pendiente de la orden.
 
 ## Otros
 

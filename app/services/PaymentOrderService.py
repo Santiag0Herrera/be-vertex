@@ -1,5 +1,4 @@
 from datetime import datetime
-from decimal import Decimal
 
 from fastapi import HTTPException
 
@@ -48,8 +47,6 @@ class PaymentOrderService:
             balance = self.payments.get_balance(request.customer_balance_id)
             if balance.client_id != self.req_user.get("id"):
                 raise HTTPException(404, "Cuenta no encontrada.")
-            if request.amount > Decimal(str(balance.balance_amount)):
-                raise HTTPException(409, "El monto supera el saldo disponible.")
             order = PaymentOrders(
                 client_id=balance.client_id, customer_balance_id=balance.id,
                 entity_id=self.req_user.get("entity_id"), currency_id=balance.balance_currency_id,
@@ -148,7 +145,7 @@ class PaymentOrderService:
             self.payments.create_record(NewPaymentRequest(
                 amount=float(amount), date=request.date,
                 customer_balance_id=order.customer_balance_id, currency_id=order.currency_id,
-            ), payment_order_id=order.id)
+            ), payment_order_id=order.id, allow_negative=True)
             order.executed_amount += amount
             order.status = "ejecutada" if order.executed_amount == order.amount else "parcialmente_ejecutada"
             order.updated_at = datetime.utcnow()

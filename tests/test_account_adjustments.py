@@ -56,12 +56,11 @@ def test_debit_note_decreases_balance(setup):
     assert result["label"] == "ND-0001"
 
 
-def test_debit_note_cannot_exceed_balance(setup):
-    with pytest.raises(HTTPException) as error:
-        note(setup, "debito", "100.01")
-    assert error.value.status_code == 409
-    assert setup["balance"].balance_amount == 100
-    assert setup["db"].query(AccountAdjustments).count() == 0
+def test_debit_note_can_leave_negative_balance(setup):
+    result = note(setup, "debito", "150.25")
+    assert setup["balance"].balance_amount == -50.25
+    assert result["balance_before"] == 100
+    assert result["balance_after"] == -50.25
 
 
 def test_debit_note_can_empty_balance(setup):

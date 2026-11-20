@@ -34,8 +34,12 @@ class PaymentService:
             raise HTTPException(404, "Cuenta no encontrada.")
         return balance
 
-    def create_record(self, payment_request, payment_order_id=None):
-        """Stage the existing payment flow; the caller owns commit/rollback."""
+    def create_record(self, payment_request, payment_order_id=None, allow_negative=False):
+        """Stage the existing payment flow; the caller owns commit/rollback.
+
+        allow_negative=True permite que el pago deje la cuenta con saldo negativo
+        (pagos manuales y ejecución de órdenes de pago).
+        """
         self.require_user()
         balance = self.get_balance(payment_request.customer_balance_id)
         amount = Decimal(str(payment_request.amount))
@@ -44,7 +48,7 @@ class PaymentService:
             raise HTTPException(422, "El monto debe ser positivo y finito.")
         if balance.balance_currency_id != payment_request.currency_id:
             raise HTTPException(409, "La moneda no coincide con la cuenta.")
-        if amount > available:
+        if not allow_negative and amount > available:
             raise HTTPException(409, "El monto supera el saldo disponible.")
         payment = Payments(
             payee_user_id=self.req_user.get("id"), amount=float(amount),
@@ -61,7 +65,7 @@ class PaymentService:
 
     def create(self, payment_request: NewPaymentRequest):
         try:
-            self.create_record(payment_request)
+            self.create_record(payment_request, allow_negative=True)
             self.db.commit()
         except Exception:
             self.db.rollback()
